@@ -11,8 +11,8 @@ export default function Pagination({ page, totalPages, onChange }) {
   }
 
   return (
-    <div className="flex items-center justify-between px-6 py-3 border-t border-zinc-800">
-      <p className="text-xs text-zinc-600">
+    <div className="flex items-center justify-between px-6 py-3 border-t border-th-line">
+      <p className="text-xs text-th-text-3">
         Página {page} de {totalPages}
       </p>
 
@@ -21,7 +21,7 @@ export default function Pagination({ page, totalPages, onChange }) {
         <button
           onClick={() => onChange(page - 1)}
           disabled={page === 1}
-          className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+          className="p-1.5 rounded-lg text-th-text-3 hover:text-th-text hover:bg-th-raised disabled:opacity-30 disabled:pointer-events-none transition-colors"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
@@ -53,7 +53,7 @@ export default function Pagination({ page, totalPages, onChange }) {
         <button
           onClick={() => onChange(page + 1)}
           disabled={page === totalPages}
-          className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+          className="p-1.5 rounded-lg text-th-text-3 hover:text-th-text hover:bg-th-raised disabled:opacity-30 disabled:pointer-events-none transition-colors"
         >
           <ChevronRight className="w-4 h-4" />
         </button>
@@ -70,7 +70,7 @@ function PageBtn({ n, current, onClick }) {
       className={`min-w-[28px] h-7 px-2 rounded-lg text-xs font-medium transition-colors ${
         isActive
           ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-          : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800'
+          : 'text-th-text-3 hover:text-th-text hover:bg-th-raised'
       }`}
     >
       {n}

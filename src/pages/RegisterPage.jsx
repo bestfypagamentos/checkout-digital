@@ -51,8 +51,8 @@ export default function RegisterPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
             </svg>
           </div>
-          <p className="text-zinc-400 text-sm">
-            Enviamos um link de confirmação para <span className="text-zinc-200 font-medium">{email}</span>.
+          <p className="text-th-text-3 text-sm">
+            Enviamos um link de confirmação para <span className="text-th-text font-medium">{email}</span>.
             Acesse seu e-mail para ativar sua conta.
           </p>
         </div>

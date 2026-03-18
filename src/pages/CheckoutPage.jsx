@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import {
   Loader2, ShieldCheck, Copy, CheckCheck,
-  AlertCircle, PartyPopper, Lock, Minus, Plus, Clock, Tag,
+  AlertCircle, PartyPopper, Lock, Minus, Plus, Clock, Tag, X,
 } from 'lucide-react'
 import { supabase } from '../lib/supabaseClient'
+import { SkeletonCheckoutProduct, SkeletonCheckoutTotals } from '../components/Skeleton'
 
 // ── Máscaras ──────────────────────────────────────────────────────────────────
 function maskCPF(v) {
@@ -56,6 +57,9 @@ export default function CheckoutPage() {
   const [errors, setErrors]               = useState({})
   const [quantity, setQuantity]           = useState(1)
   const [coupon, setCoupon]               = useState('')
+  const [couponApplied, setCouponApplied] = useState(null)
+  const [couponError, setCouponError]     = useState('')
+  const [validatingCoupon, setValidatingCoupon] = useState(false)
   const [paymentResult, setPaymentResult] = useState(null)
   const [saleId, setSaleId]               = useState(null)
   const [confirmedName, setConfirmedName] = useState('')
@@ -63,13 +67,15 @@ export default function CheckoutPage() {
   const [copied, setCopied]               = useState(false)
   const [errorMsg, setErrorMsg]           = useState('')
   const channelRef                        = useRef(null)
+  const [productOffers, setProductOffers] = useState([])
+  const [selectedOffer, setSelectedOffer] = useState(null)
 
   // ── Init + Auto-restore ───────────────────────────────────────────────────
   useEffect(() => {
     async function init() {
       const { data: prod, error: prodErr } = await supabase
         .from('products')
-        .select('id, name, description, price, delivery_url, user_id, allow_coupons, image_url, checkout_settings')
+        .select('id, name, description, price, delivery_url, user_id, allow_coupons, image_url')
         .eq('id', productId)
         .single()
 
@@ -80,9 +86,57 @@ export default function CheckoutPage() {
       }
 
       setProduct(prod)
+
+      // Carrega oferta(s): se ?off= estiver na URL, busca apenas aquela
+      const offerId = searchParams.get('off')
+      let offersData
+      if (offerId) {
+        const { data } = await supabase
+          .from('product_offers')
+          .select('*')
+          .eq('id', offerId)
+          .eq('product_id', productId)
+          .single()
+        offersData = data ? [data] : []
+      } else {
+        const { data } = await supabase
+          .from('product_offers')
+          .select('*')
+          .eq('product_id', productId)
+          .order('is_main', { ascending: false })
+          .order('created_at', { ascending: true })
+        offersData = data || []
+      }
+
+      if (offersData.length > 0) {
+        setProductOffers(offersData)
+        setSelectedOffer(offersData[0])
+      }
+
       setDeliveryUrl(prod.delivery_url || '')
-      if (prod.checkout_settings && Object.keys(prod.checkout_settings).length > 0) {
-        setCs({ ...CS_DEFAULTS, ...prod.checkout_settings })
+
+      // Carrega settings do checkout específico (via ?chk=) ou fallback para o padrão
+      const checkoutId = searchParams.get('chk')
+      if (checkoutId) {
+        const { data: checkout } = await supabase
+          .from('product_checkouts')
+          .select('settings')
+          .eq('id', checkoutId)
+          .single()
+        if (checkout?.settings && Object.keys(checkout.settings).length > 0) {
+          setCs({ ...CS_DEFAULTS, ...checkout.settings })
+        }
+      } else {
+        // Fallback: checkout padrão do produto
+        const { data: defaultCheckout } = await supabase
+          .from('product_checkouts')
+          .select('settings')
+          .eq('product_id', productId)
+          .eq('is_default', true)
+          .single()
+        if (defaultCheckout?.settings && Object.keys(defaultCheckout.settings).length > 0) {
+          setCs({ ...CS_DEFAULTS, ...defaultCheckout.settings })
+        }
       }
 
       // Busca nome do vendedor
@@ -134,6 +188,42 @@ export default function CheckoutPage() {
     return () => { if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null } }
   }, [saleId])
 
+  // ── Aplicar cupom ─────────────────────────────────────────────────────────
+  async function handleApplyCoupon() {
+    if (!coupon.trim()) return
+    setValidatingCoupon(true)
+    setCouponError('')
+    setCouponApplied(null)
+
+    const { data, error } = await supabase
+      .from('coupons')
+      .select('id, code, discount_percent, starts_at, expires_at')
+      .eq('product_id', productId)
+      .eq('code', coupon.trim().toUpperCase())
+      .single()
+
+    if (error || !data) {
+      setCouponError('Cupom inválido ou não encontrado.')
+      setValidatingCoupon(false)
+      return
+    }
+
+    const now = new Date()
+    if (data.starts_at && new Date(data.starts_at) > now) {
+      setCouponError('Este cupom ainda não está ativo.')
+      setValidatingCoupon(false)
+      return
+    }
+    if (data.expires_at && new Date(data.expires_at) < now) {
+      setCouponError('Este cupom expirou.')
+      setValidatingCoupon(false)
+      return
+    }
+
+    setCouponApplied(data)
+    setValidatingCoupon(false)
+  }
+
   // ── Validação + Submit ────────────────────────────────────────────────────
   function validate() {
     const e = {}
@@ -160,6 +250,8 @@ export default function CheckoutPage() {
         customerEmail: form.email,
         customerCpf:   form.cpf,
         customerPhone: form.phone.replace(/\D/g, ''),
+        couponCode:    couponApplied?.code || null,
+        offerId:       selectedOffer?.id || null,
       },
     })
 
@@ -186,14 +278,35 @@ export default function CheckoutPage() {
     setTimeout(() => setCopied(false), 2500)
   }
 
-  const total = product ? product.price * quantity : 0
+  const activePrice = selectedOffer?.price ?? product?.price ?? 0
+  const discount = couponApplied && product ? activePrice * quantity * (couponApplied.discount_percent / 100) : 0
+  const total = activePrice * quantity - discount
   const fmt   = (v) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (pageState === 'loading') return (
     <Shell>
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 className="w-6 h-6 text-[#16A34A] animate-spin" />
+      <div className="max-w-lg mx-auto px-4 pb-10">
+        {/* Timer skeleton */}
+        <div className="h-11 rounded-xl bg-gray-200 animate-pulse mb-5" />
+        {/* Card do produto skeleton */}
+        <SkeletonCheckoutProduct />
+        {/* Totais skeleton */}
+        <SkeletonCheckoutTotals />
+        {/* Título "Contato" skeleton */}
+        <div className="h-7 w-24 rounded-lg bg-gray-200 animate-pulse mb-4 mt-2" />
+        {/* Campos do formulário skeleton */}
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-12 rounded-xl bg-gray-200 animate-pulse" />
+          ))}
+        </div>
+        {/* Título "Pagamento" skeleton */}
+        <div className="h-7 w-28 rounded-lg bg-gray-200 animate-pulse mt-6 mb-4" />
+        {/* Opção PIX skeleton */}
+        <div className="h-14 rounded-xl bg-gray-200 animate-pulse mb-4" />
+        {/* Botão skeleton */}
+        <div className="h-14 rounded-xl bg-gray-200 animate-pulse" />
       </div>
     </Shell>
   )
@@ -210,45 +323,58 @@ export default function CheckoutPage() {
   // ── PIX Gerado ────────────────────────────────────────────────────────────
   if (pageState === 'pix') return (
     <Shell sellerName={sellerName} cs={cs}>
-      <div className="max-w-lg mx-auto px-4 py-8 text-center">
-        <div className="w-16 h-16 rounded-full bg-green-50 border border-green-200 flex items-center justify-center mx-auto mb-4">
-          <CheckCheck className="w-8 h-8 text-[#16A34A]" />
-        </div>
-        <h2 className="text-2xl font-bold text-zinc-900 mb-1">PIX gerado com sucesso!</h2>
-        <p className="text-sm text-zinc-500 mb-6">Escaneie o QR Code ou copie o código abaixo.</p>
+      <div className="max-w-[600px] mx-auto px-4 py-8">
+        {/* Card central */}
+        <div className="bg-white border border-zinc-200 rounded-2xl shadow-sm px-6 py-8 flex flex-col items-center text-center">
 
-        <div className="inline-flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-full px-4 py-1.5 mb-6">
-          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-          <span className="text-xs font-semibold text-amber-700">Aguardando pagamento...</span>
-        </div>
-
-        {paymentResult?.qrCode && (
-          <div className="bg-white border border-gray-100 rounded-2xl p-5 inline-flex mb-6 shadow-md">
-            <img src={paymentResult.qrCode} alt="QR Code PIX" className="w-52 h-52"
-              onError={e => { e.currentTarget.style.display = 'none' }} />
+          {/* Ícone */}
+          <div className="w-16 h-16 rounded-full bg-green-50 border border-green-200 flex items-center justify-center mb-4">
+            <CheckCheck className="w-8 h-8 text-[#16A34A]" />
           </div>
-        )}
 
-        <Card className="mb-3 text-left">
-          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-widest mb-2">PIX Copia e Cola</p>
-          <p className="text-xs text-zinc-600 font-mono break-all leading-relaxed select-all">{paymentResult?.qrCodeText}</p>
-        </Card>
+          {/* Título */}
+          <h2 className="text-2xl font-bold text-zinc-900 mb-1">PIX gerado com sucesso!</h2>
+          <p className="text-sm text-zinc-500 mb-5">Escaneie o QR Code ou copie o código abaixo.</p>
 
-        <button onClick={handleCopy}
-          className="w-full flex items-center justify-center gap-2 font-bold py-4 rounded-xl text-sm bg-[#16A34A] hover:bg-green-500 text-white mb-4 shadow-md shadow-green-200 transition-colors">
-          {copied ? <><CheckCheck className="w-4 h-4" /> Copiado!</> : <><Copy className="w-4 h-4" /> Copiar código PIX</>}
-        </button>
+          {/* Badge aguardando */}
+          <div className="inline-flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-full px-4 py-1.5 mb-6">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            <span className="text-xs font-semibold text-amber-700">Aguardando pagamento...</span>
+          </div>
 
-        <Card className="text-left space-y-3">
-          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">Como pagar</p>
-          {['Abra o app do seu banco.', 'Escolha Pagar com Pix.', 'Aponte a câmera ou cole o código.', 'Confirme o pagamento.']
-            .map((s, i) => (
-              <div key={i} className="flex items-start gap-3">
-                <span className="w-5 h-5 rounded-full bg-green-100 text-[#16A34A] text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
-                <p className="text-sm text-zinc-600">{s}</p>
-              </div>
-            ))}
-        </Card>
+          {/* QR Code */}
+          {paymentResult?.qrCode && (
+            <div className="bg-white border border-gray-100 rounded-2xl p-5 inline-flex mb-6 shadow-md">
+              <img src={paymentResult.qrCode} alt="QR Code PIX" className="w-52 h-52"
+                onError={e => { e.currentTarget.style.display = 'none' }} />
+            </div>
+          )}
+
+          {/* PIX Copia e Cola */}
+          <div className="w-full bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4 text-left">
+            <p className="text-xs font-semibold text-zinc-400 uppercase tracking-widest mb-2">PIX Copia e Cola</p>
+            <p className="text-xs text-zinc-600 font-mono break-all leading-relaxed select-all">{paymentResult?.qrCodeText}</p>
+          </div>
+
+          {/* Botão copiar */}
+          <button onClick={handleCopy}
+            className="w-full flex items-center justify-center gap-2 font-bold py-4 rounded-xl text-sm bg-[#16A34A] hover:bg-green-500 text-white shadow-md shadow-green-200 transition-colors mb-6">
+            {copied ? <><CheckCheck className="w-4 h-4" /> Copiado!</> : <><Copy className="w-4 h-4" /> Copiar código PIX</>}
+          </button>
+
+          {/* Como pagar */}
+          <div className="w-full bg-gray-50 border border-gray-100 rounded-xl p-4 text-left space-y-3">
+            <p className="text-xs font-semibold text-zinc-400 uppercase tracking-widest">Como pagar</p>
+            {['Abra o app do seu banco.', 'Escolha Pagar com Pix.', 'Aponte a câmera ou cole o código.', 'Confirme o pagamento.']
+              .map((s, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <span className="w-5 h-5 rounded-full bg-green-100 text-[#16A34A] text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
+                  <p className="text-sm text-zinc-600">{s}</p>
+                </div>
+              ))}
+          </div>
+
+        </div>
 
         <Footer sellerName={sellerName} />
       </div>
@@ -312,6 +438,54 @@ export default function CheckoutPage() {
           </p>
         </div>
 
+        {/* ── Seletor de Oferta (apenas quando não há ?off= na URL e há múltiplas) ── */}
+        {!searchParams.get('off') && productOffers.length > 1 && (
+          <div className="mb-4">
+            <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Escolha sua oferta</p>
+            <div className="space-y-2">
+              {productOffers.map(offer => {
+                const isSelected = selectedOffer?.id === offer.id
+                return (
+                  <button
+                    key={offer.id}
+                    type="button"
+                    onClick={() => setSelectedOffer(offer)}
+                    className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border-2 transition-all text-left ${
+                      isSelected
+                        ? 'border-[var(--btn)] bg-white shadow-sm'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                    style={isSelected ? { borderColor: cs.button_color } : {}}
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-zinc-800">{offer.name}</p>
+                      {offer.type === 'recurring' && offer.interval_type && (
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                          A cada {offer.interval_count}{' '}
+                          {{ day: 'dia', week: 'semana', month: 'mês', year: 'ano' }[offer.interval_type]}
+                          {offer.interval_count > 1 ? 's' : ''}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 ml-3">
+                      <span className="text-base font-black" style={{ color: cs.button_color }}>
+                        {Number(offer.price).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </span>
+                      {isSelected && (
+                        <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: cs.button_color }}>
+                          <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* ── Produto ── */}
         <Card className="mb-4">
           <div className="flex items-center gap-4">
@@ -336,7 +510,7 @@ export default function CheckoutPage() {
               {product.description && (
                 <p className="text-xs text-zinc-400 mt-0.5 line-clamp-1">{product.description}</p>
               )}
-              <p className="text-lg font-black mt-1" style={{ color: cs.button_color }}>{fmt(product.price)}</p>
+              <p className="text-lg font-black mt-1" style={{ color: cs.button_color }}>{fmt(activePrice)}</p>
             </div>
 
             {/* Qty */}
@@ -360,22 +534,53 @@ export default function CheckoutPage() {
         {product.allow_coupons && (
           <Card className="mb-4">
             <p className="text-xs font-semibold text-zinc-500 mb-2">Cupom de desconto</p>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-300" />
-                <input
-                  type="text"
-                  value={coupon}
-                  onChange={e => setCoupon(e.target.value.toUpperCase())}
-                  placeholder="Código do cupom"
-                  className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm text-zinc-700 placeholder-zinc-300 focus:border-[#16A34A] focus:ring-2 focus:ring-green-500/10 outline-none transition"
-                />
+            {couponApplied ? (
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 border border-green-200 rounded-full px-2.5 py-1">
+                    <CheckCheck className="w-3.5 h-3.5" />
+                    -{couponApplied.discount_percent}% aplicado
+                  </span>
+                  <span className="text-sm font-mono font-bold text-zinc-700">{couponApplied.code}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setCouponApplied(null); setCouponError('') }}
+                  className="p-1 text-zinc-400 hover:text-zinc-600 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
-              <button type="button"
-                className="text-sm font-semibold text-[#16A34A] hover:text-green-700 px-3 transition-colors whitespace-nowrap">
-                Adicionar
-              </button>
-            </div>
+            ) : (
+              <>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-300" />
+                    <input
+                      type="text"
+                      value={coupon}
+                      onChange={e => setCoupon(e.target.value.toUpperCase())}
+                      placeholder="Código do cupom"
+                      className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm text-zinc-700 placeholder-zinc-300 focus:border-[#16A34A] focus:ring-2 focus:ring-green-500/10 outline-none transition"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleApplyCoupon}
+                    disabled={validatingCoupon}
+                    className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#16A34A] hover:text-green-700 disabled:opacity-50 px-3 transition-colors whitespace-nowrap"
+                  >
+                    {validatingCoupon
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
+                      : 'Adicionar'
+                    }
+                  </button>
+                </div>
+                {couponError && (
+                  <p className="text-xs text-red-500 mt-1.5">{couponError}</p>
+                )}
+              </>
+            )}
           </Card>
         )}
 
@@ -384,8 +589,14 @@ export default function CheckoutPage() {
           <div className="space-y-2.5">
             <div className="flex items-center justify-between text-sm">
               <span className="text-zinc-500">Subtotal</span>
-              <span className="text-zinc-700 font-medium">{fmt(total)}</span>
+              <span className="text-zinc-700 font-medium">{fmt(activePrice * quantity)}</span>
             </div>
+            {couponApplied && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-emerald-600">Desconto ({couponApplied.discount_percent}%)</span>
+                <span className="text-emerald-600 font-medium">-{fmt(discount)}</span>
+              </div>
+            )}
           </div>
           <div className="border-t border-gray-100 mt-3 pt-3">
             <div className="flex items-baseline justify-between">

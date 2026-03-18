@@ -118,7 +118,7 @@ export default function IntegrationsPage() {
   return (
     <DashboardLayout>
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-zinc-100">Integrações</h1>
+        <h1 className="text-2xl font-semibold text-th-text">Integrações</h1>
         <p className="text-zinc-500 text-sm mt-1">Conecte seu gateway de pagamentos.</p>
       </div>
 
@@ -130,13 +130,13 @@ export default function IntegrationsPage() {
         <div className="max-w-2xl space-y-4">
 
           {/* ── Card Bestfy ── */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
+          <div className="th-card bg-th-surface border border-th-line rounded-2xl overflow-hidden">
             {/* Card header */}
-            <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-800">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-th-line">
               <div className="flex items-center gap-3">
                 <BestfyIcon size={40} />
                 <div>
-                  <p className="font-medium text-zinc-100 text-sm">Bestfy</p>
+                  <p className="font-medium text-th-text text-sm">Bestfy</p>
                   <p className="text-xs text-zinc-500">Gateway de pagamentos via PIX</p>
                 </div>
               </div>
@@ -148,7 +148,7 @@ export default function IntegrationsPage() {
                   Conectado
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 bg-zinc-800 border border-zinc-700 px-3 py-1 rounded-full">
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500 bg-th-raised border border-zinc-300 dark:border-zinc-800 px-3 py-1 rounded-full">
                   <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
                   Não conectado
                 </span>
@@ -179,9 +179,9 @@ export default function IntegrationsPage() {
               <div>
                 <label className="label flex items-center gap-1.5">
                   API Key
-                  <ShieldCheck className="w-3.5 h-3.5 text-zinc-600" />
+                  <ShieldCheck className="w-3.5 h-3.5 text-th-text-4" />
                 </label>
-                <p className="text-xs text-zinc-600 mb-2">
+                <p className="text-xs text-th-text-4 mb-2">
                   Encontre sua chave em <span className="text-zinc-500">Dashboard Bestfy → Configurações → API</span>
                 </p>
                 <div className="relative">
@@ -200,7 +200,7 @@ export default function IntegrationsPage() {
                   <button
                     type="button"
                     onClick={() => setShowKey(v => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors p-1"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-th-text-2 transition-colors p-1"
                     tabIndex={-1}
                   >
                     {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -238,7 +238,7 @@ export default function IntegrationsPage() {
           </div>
 
           {/* Nota de segurança */}
-          <p className="text-xs text-zinc-600 px-1">
+          <p className="text-xs text-th-text-4 px-1">
             A API Key é armazenada de forma segura e usada apenas para processar pagamentos dos seus checkouts.
           </p>
 

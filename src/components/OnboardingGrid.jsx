@@ -10,7 +10,7 @@ function Badge({ type }) {
     done:    { label: 'Concluído',    cls: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' },
     pending: { label: 'Pendente',     cls: 'bg-yellow-500/10  text-yellow-400  border border-yellow-500/20'  },
     start:   { label: 'Comece agora', cls: 'bg-emerald-500/10  text-emerald-400  border border-emerald-500/20'  },
-    soon:    { label: 'Em breve',     cls: 'bg-slate-800      text-slate-500   border border-slate-700'      },
+    soon:    { label: 'Em breve',     cls: 'bg-th-raised      text-th-text-4   border border-zinc-300 dark:border-zinc-700/50'      },
     ready:   { label: 'Disponível',   cls: 'bg-sky-500/10     text-sky-400     border border-sky-500/20'     },
   }
   const { label, cls } = map[type] ?? map.soon
@@ -27,7 +27,7 @@ function Badge({ type }) {
 // ── Card grande ───────────────────────────────────────────────────────────────
 function LargeCard({ step, icon: Icon, iconColor, iconBg, iconNode, title, description, badge, action }) {
   return (
-    <div className="relative bg-zinc-900/60 border border-zinc-800 rounded-xl p-6 flex flex-col gap-4 group hover:border-zinc-700 hover:bg-zinc-900 transition-all duration-200">
+    <div className="relative bg-th-raised border border-th-line rounded-xl p-6 flex flex-col gap-4 group hover:border-th-line-2 transition-all duration-200">
 
       {/* Icon + Badge */}
       <div className="flex items-start justify-between">
@@ -41,11 +41,11 @@ function LargeCard({ step, icon: Icon, iconColor, iconBg, iconNode, title, descr
 
       {/* Text */}
       <div>
-        <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-1.5">
+        <p className="text-[10px] font-bold text-th-text-4 uppercase tracking-widest mb-1.5">
           Passo {String(step).padStart(2, '0')}
         </p>
-        <h3 className="text-sm font-semibold text-zinc-100 leading-snug">{title}</h3>
-        <p className="text-xs text-zinc-500 mt-2 leading-relaxed">{description}</p>
+        <h3 className="text-sm font-semibold text-th-text leading-snug">{title}</h3>
+        <p className="text-xs text-th-text-3 mt-2 leading-relaxed">{description}</p>
       </div>
 
       {/* Action */}
@@ -84,10 +84,10 @@ export default function OnboardingGrid({
       {/* Cabeçalho da seção */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-200 uppercase tracking-wider">
+          <h2 className="text-sm font-semibold text-th-text-2 uppercase tracking-wider">
             Primeiros Passos
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-th-text-4 mt-0.5">
             {completedCount === totalRequired
               ? 'Configuração completa — você está pronto para vender.'
               : `${completedCount} de ${totalRequired} etapas obrigatórias concluídas.`}
@@ -96,13 +96,13 @@ export default function OnboardingGrid({
 
         {/* Barra de progresso */}
         <div className="hidden sm:flex items-center gap-2">
-          <div className="w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+          <div className="w-24 h-1.5 bg-th-raised rounded-full overflow-hidden">
             <div
               className="h-full bg-emerald-500 rounded-full transition-all duration-500"
               style={{ width: `${(completedCount / totalRequired) * 100}%` }}
             />
           </div>
-          <span className="text-xs text-slate-500 font-mono">
+          <span className="text-xs text-th-text-4 font-mono">
             {completedCount}/{totalRequired}
           </span>
         </div>

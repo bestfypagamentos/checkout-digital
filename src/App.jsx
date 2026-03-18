@@ -26,7 +26,7 @@ export default function App() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/products" element={<ProductsPage />} />
             <Route path="/products/:id" element={<ProductEditPage />} />
-            <Route path="/products/:id/checkout-editor" element={<CheckoutEditor />} />
+            <Route path="/products/:id/checkout-editor/:checkoutId" element={<CheckoutEditor />} />
             <Route path="/integrations" element={<IntegrationsPage />} />
             <Route path="/transactions" element={<TransactionsPage />} />
           </Route>

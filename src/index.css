@@ -4,22 +4,81 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Light mode (default) — paleta neutra estilo Cakto ─────────────────── */
+:root {
+  --th-bg:      245 245 245;  /* #F5F5F5 — fundo da página, cinza neutro suave  */
+  --th-surface: 255 255 255;  /* #FFFFFF — cards, sidebar, modais             */
+  --th-raised:  238 238 238;  /* #EEEEEE — hover, skeleton (contraste visível) */
+  --th-muted:   226 226 226;  /* #E2E2E2 — skeleton secundário, divisores      */
+  --th-line:    229 229 229;  /* #E5E5E5 — bordas primárias (muito sutis)      */
+  --th-line-2:  212 212 212;  /* #D4D4D4 — bordas secundárias                 */
+  --th-text:     15  15  15;  /* #0F0F0F — texto principal (quase preto)       */
+  --th-text-2:   51  51  51;  /* #333333 — títulos e subtítulos               */
+  --th-text-3:  102 102 102;  /* #666666 — texto secundário / labels          */
+  --th-text-4:  163 163 163;  /* #A3A3A3 — placeholders / texto muito suave   */
+}
+
+/* ── Dark mode — paleta neutra escura ───────────────────────────────────── */
+.dark {
+  --th-bg:       20  20  20;  /* #141414 — fundo da página, cinza carvão      */
+  --th-surface:  31  31  31;  /* #1F1F1F — cards, sidebar, modais             */
+  --th-raised:   46  46  46;  /* #2E2E2E — hover, skeleton (contraste visível) */
+  --th-muted:    60  60  60;  /* #3C3C3C — skeleton secundário, divisores      */
+  --th-line:     26  26  26;  /* #1A1A1A — bordas (quase invisíveis)          */
+  --th-line-2:   42  42  42;  /* #2A2A2A — bordas secundárias                 */
+  --th-text:    234 234 234;  /* #EAEAEA — texto principal (off-white neutro) */
+  --th-text-2:  150 150 150;  /* #969696 — subtítulos e labels                */
+  --th-text-3:   96  96  96;  /* #606060 — texto de comparação / secundário   */
+  --th-text-4:   62  62  62;  /* #3E3E3E — placeholders / muito suave         */
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
 @layer base {
   body {
-    @apply bg-zinc-950 text-zinc-100 antialiased;
+    /* Usa CSS vars diretamente — evita @apply com tokens custom */
+    background-color: rgb(var(--th-bg));
+    color: rgb(var(--th-text));
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 }
 
+/* ── Card elevation ──────────────────────────────────────────────────────── */
+/* Light mode: sombra suave + borda quase invisível (estilo Cakto)            */
+/* Dark mode:  sem sombra, todas bordas via opacidade — evita "linhas brancas"*/
+:root .th-card {
+  box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 0 0 1px rgb(0 0 0 / 0.04);
+}
+.dark .th-card {
+  box-shadow: none;
+  border-color: rgb(255 255 255 / 0.06) !important;
+}
+
+/* Bordas estruturais no dark mode — sidebar, divisores, headers ────────── */
+/* Força opacidade em todas as bordas que usam border-th-line / divide-th-line */
+.dark .border-th-line {
+  border-color: rgb(255 255 255 / 0.06) !important;
+}
+.dark .divide-th-line > * + * {
+  border-color: rgb(255 255 255 / 0.05) !important;
+}
+
+/* ── Shared component classes ────────────────────────────────────────────── */
 @layer components {
   .btn-primary {
-    @apply w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2.5 px-4 rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-900 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2.5 px-4 rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+    /* ring-offset usa a cor de surface do tema */
+    --tw-ring-offset-color: rgb(var(--th-surface));
   }
 
   .input-field {
-    @apply w-full bg-zinc-800 border border-zinc-700 text-zinc-100 placeholder-zinc-500 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200;
+    @apply w-full rounded-lg px-4 py-2.5 text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200 border border-zinc-300 dark:border-zinc-700/50;
+    background-color: rgb(var(--th-raised));
+    color: rgb(var(--th-text));
   }
 
   .label {
-    @apply block text-sm font-medium text-zinc-400 mb-1.5;
+    @apply block text-sm font-medium mb-1.5;
+    color: rgb(var(--th-text-3));
   }
 }

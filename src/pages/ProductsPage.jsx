@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { Pencil, Trash2, Plus, X, Package, ExternalLink, Loader2, Link2, CheckCheck, Search } from 'lucide-react'
 import DashboardLayout from '../components/DashboardLayout'
 import Pagination from '../components/Pagination'
+import { SkeletonProductRow } from '../components/Skeleton'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../contexts/AuthContext'
+import { cacheGet, cacheSet, cacheDel } from '../lib/cache'
 
 const PAGE_SIZE  = 15
 const EMPTY_FORM = { name: '', description: '', price: '', delivery_url: '', allow_coupons: false }
@@ -37,28 +39,52 @@ export default function ProductsPage() {
   const [search, setSearch] = useState('')
 
   // ─── Fetch ──────────────────────────────────────────────────────────────────
-  const fetchProducts = useCallback(async () => {
-    setLoadingList(true)
+  const CACHE_KEY = `products:${user.id}`
+
+  // fetchProducts: por padrão aplica SWR (cache hit → sem skeleton)
+  // silent=true é usado pelo re-fetch em background e pelo realtime
+  const fetchProducts = useCallback(async ({ silent = false } = {}) => {
+    const cached = cacheGet(CACHE_KEY)
+
+    if (cached && !silent) {
+      // Cache hit: exibe dados imediatamente sem skeleton
+      setProducts(cached)
+      setLoadingList(false)
+      // Re-fetch silencioso em background para manter lista atualizada
+      fetchProducts({ silent: true })
+      return
+    }
+
+    // Cache miss ou chamada silenciosa: busca no Supabase
+    if (!silent) setLoadingList(true)
+
     const { data, error } = await supabase
       .from('products')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
 
-    if (!error) { setProducts(data); setPage(1) }
-    setLoadingList(false)
-  }, [user.id])
+    if (!error) {
+      cacheSet(CACHE_KEY, data)
+      setProducts(data)
+      if (!silent) setPage(1)
+    }
+    if (!silent) setLoadingList(false)
+  }, [user.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     fetchProducts()
 
-    // Realtime: escuta INSERT / UPDATE / DELETE na tabela products para o user
+    // Realtime: atualiza silenciosamente sem mostrar skeleton nem afetar paginação
     const channel = supabase
       .channel('products-changes')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'products', filter: `user_id=eq.${user.id}` },
-        () => fetchProducts()
+        () => {
+          cacheDel(CACHE_KEY)
+          fetchProducts({ silent: true })
+        }
       )
       .subscribe()
 
@@ -134,7 +160,7 @@ export default function ProductsPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Produtos</h1>
+          <h1 className="text-2xl font-semibold text-th-text">Produtos</h1>
           <p className="text-zinc-500 text-sm mt-1">Gerencie seus produtos digitais.</p>
         </div>
         <button onClick={openCreate} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors">
@@ -151,12 +177,12 @@ export default function ProductsPage() {
           value={search}
           onChange={e => { setSearch(e.target.value); setPage(1) }}
           placeholder="Buscar produto pelo nome..."
-          className="w-full max-w-sm bg-zinc-900 border border-zinc-800 text-zinc-100 placeholder-zinc-600 rounded-xl pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-all"
+          className="w-full max-w-sm bg-th-surface border border-th-line text-th-text placeholder-zinc-400 rounded-xl pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-all"
         />
         {search && (
           <button
             onClick={() => { setSearch(''); setPage(1) }}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-th-text-4 hover:text-th-text-3 transition-colors"
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -166,11 +192,11 @@ export default function ProductsPage() {
       {/* ── Modal / Form ── */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl">
+          <div className="w-full max-w-lg bg-th-surface border border-th-line rounded-2xl shadow-2xl">
             {/* Modal header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-              <h2 className="font-semibold text-zinc-100">Novo produto</h2>
-              <button onClick={closeForm} className="text-zinc-500 hover:text-zinc-300 transition-colors p-1 rounded-lg hover:bg-zinc-800">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-th-line">
+              <h2 className="font-semibold text-th-text">Novo produto</h2>
+              <button onClick={closeForm} className="text-zinc-500 hover:text-th-text-2 transition-colors p-1 rounded-lg hover:bg-th-raised">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -190,7 +216,7 @@ export default function ProductsPage() {
               </div>
 
               <div>
-                <label className="label">Descrição <span className="text-zinc-600">(opcional)</span></label>
+                <label className="label">Descrição <span className="text-th-text-4">(opcional)</span></label>
                 <textarea
                   value={form.description}
                   onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
@@ -216,7 +242,7 @@ export default function ProductsPage() {
               </div>
 
               <div>
-                <label className="label">Link de entrega <span className="text-zinc-600">(opcional)</span></label>
+                <label className="label">Link de entrega <span className="text-th-text-4">(opcional)</span></label>
                 <input
                   type="url"
                   value={form.delivery_url}
@@ -227,9 +253,9 @@ export default function ProductsPage() {
               </div>
 
               {/* Toggle: cupom de desconto */}
-              <div className="flex items-center justify-between bg-zinc-800/60 border border-zinc-700/60 rounded-xl px-4 py-3.5">
+              <div className="flex items-center justify-between bg-th-raised/60 border border-zinc-300/60 dark:border-zinc-700/30 rounded-xl px-4 py-3.5">
                 <div>
-                  <p className="text-sm font-medium text-zinc-200">Cupom de desconto</p>
+                  <p className="text-sm font-medium text-th-text-2">Cupom de desconto</p>
                   <p className="text-xs text-zinc-500 mt-0.5">
                     Exibe campo de cupom no checkout deste produto.
                   </p>
@@ -256,7 +282,7 @@ export default function ProductsPage() {
               )}
 
               <div className="flex items-center gap-3 pt-1">
-                <button type="button" onClick={closeForm} className="flex-1 py-2.5 text-sm font-medium text-zinc-400 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors">
+                <button type="button" onClick={closeForm} className="flex-1 py-2.5 text-sm font-medium text-th-text-3 bg-th-raised hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg transition-colors">
                   Cancelar
                 </button>
                 <button type="submit" disabled={loadingSubmit} className="flex-1 btn-primary">
@@ -273,8 +299,17 @@ export default function ProductsPage() {
 
       {/* ── Products table ── */}
       {loadingList ? (
-        <div className="flex items-center justify-center py-24">
-          <Loader2 className="w-6 h-6 text-emerald-500 animate-spin" />
+        <div className="th-card bg-th-surface border border-th-line rounded-xl overflow-hidden">
+          <div className="hidden md:grid grid-cols-[1fr_2fr_120px_1fr_140px] gap-4 px-6 py-3 border-b border-th-line text-xs font-medium text-zinc-500 uppercase tracking-wider">
+            <span>Nome</span>
+            <span>Descrição</span>
+            <span>Preço</span>
+            <span>Link de entrega</span>
+            <span className="text-right">Ações</span>
+          </div>
+          <ul className="divide-y divide-th-line">
+            {Array.from({ length: 6 }).map((_, i) => <SkeletonProductRow key={i} />)}
+          </ul>
         </div>
       ) : products.length === 0 ? (
         <EmptyState onAdd={openCreate} />
@@ -282,9 +317,9 @@ export default function ProductsPage() {
         const totalPages = Math.ceil(products.length / PAGE_SIZE)
         const paginated  = products.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
         return (
-        <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+        <div className="th-card bg-th-surface border border-th-line rounded-xl overflow-hidden">
           {/* Table header */}
-          <div className="hidden md:grid grid-cols-[1fr_2fr_120px_1fr_140px] gap-4 px-6 py-3 border-b border-zinc-800 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+          <div className="hidden md:grid grid-cols-[1fr_2fr_120px_1fr_140px] gap-4 px-6 py-3 border-b border-th-line text-xs font-medium text-zinc-500 uppercase tracking-wider">
             <span>Nome</span>
             <span>Descrição</span>
             <span>Preço</span>
@@ -293,13 +328,13 @@ export default function ProductsPage() {
           </div>
 
           {/* Rows */}
-          <ul className="divide-y divide-zinc-800">
+          <ul className="divide-y divide-th-line">
             {paginated.map(product => (
-              <li key={product.id} className="grid md:grid-cols-[1fr_2fr_120px_1fr_140px] gap-4 items-center px-6 py-4 hover:bg-zinc-800/40 transition-colors">
+              <li key={product.id} className="grid md:grid-cols-[1fr_2fr_120px_1fr_140px] gap-4 items-center px-6 py-4 hover:bg-th-raised/40 transition-colors">
                 {/* Nome */}
                 <div>
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium text-zinc-100 truncate">{product.name}</p>
+                    <p className="text-sm font-medium text-th-text truncate">{product.name}</p>
                     {product.allow_coupons && (
                       <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/20">
                         Cupom
@@ -314,7 +349,7 @@ export default function ProductsPage() {
 
                 {/* Descrição */}
                 <p className="text-sm text-zinc-500 truncate hidden md:block">
-                  {product.description || <span className="italic text-zinc-700">Sem descrição</span>}
+                  {product.description || <span className="italic text-th-text-4">Sem descrição</span>}
                 </p>
 
                 {/* Preço */}
@@ -335,7 +370,7 @@ export default function ProductsPage() {
                       <span className="truncate">{product.delivery_url.replace(/^https?:\/\//, '')}</span>
                     </a>
                   ) : (
-                    <span className="text-xs text-zinc-700 italic">Não informado</span>
+                    <span className="text-xs text-th-text-4 italic">Não informado</span>
                   )}
                 </div>
 
@@ -375,8 +410,8 @@ export default function ProductsPage() {
           </ul>
 
           {/* Footer */}
-          <div className="flex items-center justify-between px-6 py-3 border-t border-zinc-800">
-            <span className="text-xs text-zinc-600">
+          <div className="flex items-center justify-between px-6 py-3 border-t border-th-line">
+            <span className="text-xs text-th-text-4">
               {products.length} {products.length === 1 ? 'produto cadastrado' : 'produtos cadastrados'}
             </span>
           </div>
@@ -391,12 +426,12 @@ export default function ProductsPage() {
 
 function EmptyState({ onAdd }) {
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-14 text-center">
-      <div className="w-16 h-16 bg-zinc-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
-        <Package className="w-8 h-8 text-zinc-600" />
+    <div className="bg-th-surface border border-th-line rounded-xl p-14 text-center">
+      <div className="w-16 h-16 bg-th-raised rounded-2xl flex items-center justify-center mx-auto mb-4">
+        <Package className="w-8 h-8 text-th-text-4" />
       </div>
-      <h3 className="text-zinc-300 font-medium mb-2">Nenhum produto cadastrado</h3>
-      <p className="text-zinc-600 text-sm mb-6 max-w-xs mx-auto">
+      <h3 className="text-th-text-2 font-medium mb-2">Nenhum produto cadastrado</h3>
+      <p className="text-th-text-4 text-sm mb-6 max-w-xs mx-auto">
         Crie seu primeiro produto digital para começar a receber pedidos.
       </p>
       <button onClick={onAdd} className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors">

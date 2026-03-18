@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import {
   TrendingUp, ShoppingBag, Users, Percent,
   Plus, X, Loader2, AlertCircle, CheckCircle2,
-  ExternalLink, Copy, Check, Package,
+  ExternalLink, Copy, Check, Package, RotateCcw,
 } from 'lucide-react'
 import DashboardLayout from '../components/DashboardLayout'
 import OnboardingGrid from '../components/OnboardingGrid'
+import { SkeletonStatCard, SkeletonProductListItem } from '../components/Skeleton'
 import { useAuth } from '../contexts/AuthContext'
 import { supabase } from '../lib/supabaseClient'
+import { cacheGet, cacheSet, cacheDel } from '../lib/cache'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function todayRange() {
@@ -38,9 +40,11 @@ export default function DashboardPage() {
   // Stats
   const [stats, setStats]               = useState(null)
   const [statsLoading, setStatsLoading] = useState(true)
+  const [refreshing, setRefreshing]     = useState(false)
 
   // Produtos recentes
   const [products, setProducts]         = useState([])
+  const [productsLoading, setProductsLoading] = useState(true)
   const [copiedId, setCopiedId]         = useState(null)
 
   // Onboarding
@@ -72,6 +76,18 @@ export default function DashboardPage() {
   }, [user])
 
   async function fetchStats() {
+    const key = `stats:${user.id}`
+    const cached = cacheGet(key)
+
+    if (cached) {
+      // Cache hit: exibe imediatamente sem skeleton. Dados só atualizam
+      // quando o TTL expirar ou o usuário clicar em "Atualizar".
+      setStats(cached)
+      setStatsLoading(false)
+      return
+    }
+
+    // Cache miss: primeira carga ou após "Atualizar" → exibe skeleton
     setStatsLoading(true)
     const { start, end } = todayRange()
 
@@ -109,23 +125,40 @@ export default function DashboardPage() {
     const uniqueCustomers = new Set((allCustomers || []).map(r => r.customer_email)).size
     const conversion = totalSales > 0 ? ((paidTotal / totalSales) * 100).toFixed(1) : '0.0'
 
-    setStats({
+    const result = {
       revenue:    revenueToday,
       orders:     ordersToday || 0,
       customers:  uniqueCustomers,
       conversion: conversion,
-    })
+    }
+
+    cacheSet(key, result, Infinity)
+    setStats(result)
     setStatsLoading(false)
   }
 
   async function fetchProducts() {
+    const key = `products:dashboard:${user.id}`
+    const cached = cacheGet(key)
+
+    if (cached) {
+      setProducts(cached)
+      setProductsLoading(false)
+      return
+    }
+
+    setProductsLoading(true)
     const { data } = await supabase
       .from('products')
       .select('id, name, price, delivery_url')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .limit(6)
-    setProducts(data || [])
+
+    const result = data || []
+    cacheSet(key, result, Infinity)
+    setProducts(result)
+    setProductsLoading(false)
   }
 
   async function checkBestfyKey() {
@@ -201,21 +234,62 @@ export default function DashboardPage() {
     const rawDigits = productForm.price.replace(/\D/g, '')
     const priceDecimal = rawDigits ? parseInt(rawDigits, 10) / 100 : 0
 
-    const { error } = await supabase.from('products').insert({
+    const { data: newProduct, error } = await supabase.from('products').insert({
       user_id:       user.id,
       name:          productForm.name.trim(),
       price:         priceDecimal,
       delivery_url:  productForm.delivery_url.trim() || null,
       allow_coupons: productForm.allow_coupons,
-    })
+    }).select().single()
+
+    if (!error && newProduct) {
+      // Cria checkout padrão + oferta principal + vínculo na junction table
+      const { data: mainCheckout } = await supabase
+        .from('product_checkouts')
+        .insert({ product_id: newProduct.id, name: 'Checkout Padrão', is_default: true })
+        .select()
+        .single()
+
+      const { data: mainOffer } = await supabase
+        .from('product_offers')
+        .insert({
+          product_id: newProduct.id,
+          name:       productForm.name.trim(),
+          price:      priceDecimal,
+          type:       'one_time',
+          is_main:    true,
+          position:   0,
+        })
+        .select()
+        .single()
+
+      if (mainCheckout && mainOffer) {
+        await supabase.from('checkout_offer_variants').insert({
+          checkout_id: mainCheckout.id,
+          offer_id:    mainOffer.id,
+        })
+      }
+    }
 
     setSavingProduct(false)
     if (!error) {
       setShowProduct(false)
       setProductForm({ name: '', price: '', delivery_url: '', allow_coupons: false })
+      // Invalida cache para garantir dados frescos após mutação
+      cacheDel(`products:dashboard:${user.id}`)
+      cacheDel(`stats:${user.id}`)
       fetchProducts()
       fetchStats()
     }
+  }
+
+  // ── Atualizar dashboard manualmente ─────────────────────────────────────
+  async function handleRefresh() {
+    setRefreshing(true)
+    cacheDel(`stats:${user.id}`)
+    cacheDel(`products:dashboard:${user.id}`)
+    await Promise.all([fetchStats(), fetchProducts()])
+    setRefreshing(false)
   }
 
   // ── Copiar link do produto ───────────────────────────────────────────────
@@ -230,28 +304,28 @@ export default function DashboardPage() {
   const statCards = [
     {
       label: 'Vendas hoje',
-      value: statsLoading ? '—' : formatBRL(stats?.revenue),
+      value: formatBRL(stats?.revenue),
       icon: TrendingUp,
       color: 'text-emerald-400',
       bg: 'bg-emerald-500/10',
     },
     {
       label: 'Pedidos',
-      value: statsLoading ? '—' : String(stats?.orders),
+      value: String(stats?.orders),
       icon: ShoppingBag,
       color: 'text-sky-400',
       bg: 'bg-sky-500/10',
     },
     {
       label: 'Clientes',
-      value: statsLoading ? '—' : String(stats?.customers),
+      value: String(stats?.customers),
       icon: Users,
       color: 'text-emerald-400',
       bg: 'bg-emerald-500/10',
     },
     {
       label: 'Conversão',
-      value: statsLoading ? '—' : `${stats?.conversion}%`,
+      value: `${stats?.conversion}%`,
       icon: Percent,
       color: 'text-amber-400',
       bg: 'bg-amber-500/10',
@@ -265,42 +339,55 @@ export default function DashboardPage() {
       {/* ── Header ── */}
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-zinc-100 tracking-tight">
+          <h1 className="text-2xl font-bold text-th-text tracking-tight">
             Olá, {firstName}
           </h1>
-          <p className="text-zinc-500 mt-0.5 text-sm">
+          <p className="text-th-text-3 mt-0.5 text-sm">
             Resumo do seu negócio hoje — {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}
           </p>
         </div>
-        <button
-          onClick={() => setShowProduct(true)}
-          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold px-4 py-2.5 rounded transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Novo produto
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing || statsLoading}
+            title="Atualizar dados"
+            className="p-2.5 text-zinc-500 hover:text-th-text-2 hover:bg-th-raised border border-th-line hover:border-zinc-300 dark:hover:border-zinc-700 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <RotateCcw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          </button>
+          <button
+            onClick={() => setShowProduct(true)}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold px-4 py-2.5 rounded transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Novo produto
+          </button>
+        </div>
       </div>
 
       {/* ── Stats Grid ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {statCards.map(({ label, value, icon: Icon, color, bg }) => (
-          <div
-            key={label}
-            className="bg-zinc-900/60 border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 hover:bg-zinc-900 transition-all duration-200"
-          >
-            <div className={`w-10 h-10 ${bg} rounded-xl flex items-center justify-center mb-4`}>
-              <Icon className={`w-5 h-5 ${color}`} strokeWidth={1.75} />
-            </div>
-            <p className="text-2xl font-bold text-zinc-100 tracking-tight leading-none mb-1.5">
-              {value}
-            </p>
-            <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">{label}</p>
-          </div>
-        ))}
+        {statsLoading
+          ? Array.from({ length: 4 }).map((_, i) => <SkeletonStatCard key={i} />)
+          : statCards.map(({ label, value, icon: Icon, color, bg }) => (
+              <div
+                key={label}
+                className="th-card bg-th-surface border border-th-line rounded-xl p-5 transition-all duration-200"
+              >
+                <div className="w-10 h-10 bg-th-raised rounded-xl flex items-center justify-center mb-4">
+                  <Icon className={`w-5 h-5 ${color}`} strokeWidth={1.75} />
+                </div>
+                <p className="text-2xl font-bold text-th-text tracking-tight leading-none mb-1.5">
+                  {value}
+                </p>
+                <p className="text-xs text-zinc-500 font-medium uppercase tracking-wider">{label}</p>
+              </div>
+            ))
+        }
       </div>
 
       {/* ── Onboarding Grid ── */}
-      <div className="mb-8">
+      <div className="mb-8 th-card bg-th-surface border border-th-line rounded-xl p-6">
         <OnboardingGrid
           hasApiKey={hasApiKey}
           hasProducts={products.length > 0}
@@ -310,56 +397,63 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* ── Produtos recentes (só quando existem) ── */}
-      {products.length > 0 && (
-        <div className="bg-zinc-900/60 border border-zinc-800 rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
-            <h2 className="text-sm font-semibold text-zinc-200 uppercase tracking-wider">
+      {/* ── Produtos recentes ── */}
+      {(productsLoading || products.length > 0) && (
+        <div className="th-card bg-th-surface border border-th-line rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-th-line">
+            <h2 className="text-sm font-semibold text-th-text-2 uppercase tracking-wider">
               Produtos Recentes
             </h2>
-            <button
-              onClick={() => navigate('/products')}
-              className="text-xs text-zinc-500 hover:text-zinc-300 flex items-center gap-1 transition-colors"
-            >
-              Ver todos <ExternalLink className="w-3 h-3" />
-            </button>
+            {!productsLoading && (
+              <button
+                onClick={() => navigate('/products')}
+                className="text-xs text-zinc-500 hover:text-th-text-2 flex items-center gap-1 transition-colors"
+              >
+                Ver todos <ExternalLink className="w-3 h-3" />
+              </button>
+            )}
           </div>
 
-          <div className="divide-y divide-zinc-800">
-            {products.map((p) => (
-              <div key={p.id} className="flex items-center justify-between px-5 py-3.5 hover:bg-zinc-800/40 transition-colors">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-zinc-200 truncate">{p.name}</p>
-                  <p className="text-xs text-zinc-500 mt-0.5">{formatBRL(p.price)}</p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0 ml-4">
-                  <button
-                    onClick={() => copyLink(p.id)}
-                    className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-200 border border-zinc-700 hover:border-zinc-600 rounded-lg px-3 py-1.5 transition-colors"
-                  >
-                    {copiedId === p.id
-                      ? <><Check className="w-3 h-3 text-emerald-400" /> Copiado</>
-                      : <><Copy className="w-3 h-3" /> Link</>
-                    }
-                  </button>
-                  <button
-                    onClick={() => navigate(`/checkout/${p.id}`)}
-                    className="text-xs text-zinc-500 hover:text-zinc-200 border border-zinc-700 hover:border-zinc-600 rounded-lg px-3 py-1.5 transition-colors"
-                  >
-                    <ExternalLink className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-            ))}
+          <div className="divide-y divide-th-line">
+            {productsLoading
+              ? Array.from({ length: 4 }).map((_, i) => <SkeletonProductListItem key={i} />)
+              : products.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between px-5 py-3.5 hover:bg-th-raised/40 transition-colors">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-th-text truncate">{p.name}</p>
+                      <p className="text-xs text-zinc-500 mt-0.5">{formatBRL(p.price)}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 ml-4">
+                      <button
+                        onClick={() => copyLink(p.id)}
+                        className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-th-text-2 border border-zinc-300 dark:border-zinc-700/50 hover:border-zinc-600 rounded-lg px-3 py-1.5 transition-colors"
+                      >
+                        {copiedId === p.id
+                          ? <><Check className="w-3 h-3 text-emerald-400" /> Copiado</>
+                          : <><Copy className="w-3 h-3" /> Link</>
+                        }
+                      </button>
+                      <button
+                        onClick={() => navigate(`/checkout/${p.id}`)}
+                        className="text-xs text-zinc-500 hover:text-th-text-2 border border-zinc-300 dark:border-zinc-700/50 hover:border-zinc-600 rounded-lg px-3 py-1.5 transition-colors"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+            }
 
-            <div className="px-5 py-3">
-              <button
-                onClick={() => setShowProduct(true)}
-                className="flex items-center gap-2 text-xs text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" /> Adicionar produto
-              </button>
-            </div>
+            {!productsLoading && (
+              <div className="px-5 py-3">
+                <button
+                  onClick={() => setShowProduct(true)}
+                  className="flex items-center gap-2 text-xs text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Adicionar produto
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -369,22 +463,22 @@ export default function DashboardPage() {
       ════════════════════════════════════════════════ */}
       {showBestfy && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-900/90 backdrop-blur-xl border border-zinc-700/60 rounded-2xl w-full max-w-md shadow-2xl shadow-black/40">
+          <div className="bg-th-surface/95 backdrop-blur-xl border border-zinc-300/60 dark:border-zinc-700/30 rounded-2xl w-full max-w-md shadow-2xl shadow-black/40">
 
             {/* Header */}
-            <div className="flex items-center justify-between px-7 py-5 border-b border-zinc-800/60">
+            <div className="flex items-center justify-between px-7 py-5 border-b border-zinc-200/60 dark:border-zinc-800/30">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 bg-emerald-500 rounded-xl flex items-center justify-center font-bold text-white text-sm shadow-lg shadow-emerald-900/40">
                   B
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-zinc-100">Conectar Bestfy</p>
+                  <p className="text-sm font-semibold text-th-text">Conectar Bestfy</p>
                   <p className="text-xs text-zinc-500">Gateway de pagamentos PIX</p>
                 </div>
               </div>
               <button
                 onClick={() => setShowBestfy(false)}
-                className="text-zinc-500 hover:text-zinc-300 p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+                className="text-zinc-500 hover:text-th-text-2 p-1.5 rounded-lg hover:bg-th-raised transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -392,14 +486,14 @@ export default function DashboardPage() {
 
             {/* Body */}
             <div className="px-7 py-6">
-              <p className="text-sm text-zinc-400 mb-6 leading-relaxed">
+              <p className="text-sm text-th-text-3 mb-6 leading-relaxed">
                 Para começar a receber pagamentos, insira sua chave de API da Bestfy.
                 Você a encontra em{' '}
-                <span className="text-zinc-200 font-medium">Configurações → API</span>{' '}
+                <span className="text-th-text-2 font-medium">Configurações → API</span>{' '}
                 no painel Bestfy.
               </p>
 
-              <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+              <label className="block text-xs font-semibold text-th-text-3 uppercase tracking-wider mb-2">
                 Chave de API (X-API-KEY)
               </label>
               <input
@@ -407,7 +501,7 @@ export default function DashboardPage() {
                 value={apiKeyInput}
                 onChange={e => { setApiKeyInput(e.target.value); setBestfyState('idle') }}
                 placeholder="bfy_live_..."
-                className="w-full bg-zinc-950/80 border border-zinc-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-600 outline-none transition mb-4 font-mono"
+                className="w-full bg-th-bg/80 border border-zinc-300 dark:border-zinc-700/50 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-4 py-3 text-sm text-th-text-2 placeholder-zinc-400 outline-none transition mb-4 font-mono"
               />
 
               {bestfyState === 'invalid' && (
@@ -449,7 +543,7 @@ export default function DashboardPage() {
 
               <button
                 onClick={() => setShowBestfy(false)}
-                className="w-full text-center text-xs text-zinc-600 hover:text-zinc-400 mt-4 py-1 transition-colors"
+                className="w-full text-center text-xs text-th-text-4 hover:text-th-text-3 mt-4 py-1 transition-colors"
               >
                 Fazer isso depois
               </button>
@@ -463,13 +557,13 @@ export default function DashboardPage() {
       ════════════════════════════════════════════════ */}
       {showProduct && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-900/90 backdrop-blur-xl border border-zinc-700/60 rounded-2xl w-full max-w-md shadow-2xl shadow-black/40">
+          <div className="bg-th-surface/95 backdrop-blur-xl border border-zinc-300/60 dark:border-zinc-700/30 rounded-2xl w-full max-w-md shadow-2xl shadow-black/40">
 
-            <div className="flex items-center justify-between px-7 py-5 border-b border-zinc-800/60">
-              <p className="text-sm font-semibold text-zinc-100">Novo Produto</p>
+            <div className="flex items-center justify-between px-7 py-5 border-b border-zinc-200/60 dark:border-zinc-800/30">
+              <p className="text-sm font-semibold text-th-text">Novo Produto</p>
               <button
                 onClick={() => { setShowProduct(false); setProductErrors({}) }}
-                className="text-zinc-500 hover:text-zinc-300 p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+                className="text-zinc-500 hover:text-th-text-2 p-1.5 rounded-lg hover:bg-th-raised transition-colors"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -478,7 +572,7 @@ export default function DashboardPage() {
             <form onSubmit={handleSaveProduct} className="px-7 py-6 space-y-5">
 
               <div>
-                <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+                <label className="block text-xs font-semibold text-th-text-3 uppercase tracking-wider mb-2">
                   Nome do produto
                 </label>
                 <input
@@ -486,13 +580,13 @@ export default function DashboardPage() {
                   value={productForm.name}
                   onChange={e => setProductForm(f => ({ ...f, name: e.target.value }))}
                   placeholder="Ex: Curso de Tráfego Pago"
-                  className={`w-full bg-zinc-950/80 border ${productErrors.name ? 'border-red-500' : 'border-zinc-700'} focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-600 outline-none transition`}
+                  className={`w-full bg-th-bg/80 border ${productErrors.name ? 'border-red-500' : 'border-zinc-300 dark:border-zinc-700/50'} focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-4 py-3 text-sm text-th-text-2 placeholder-zinc-400 outline-none transition`}
                 />
                 {productErrors.name && <p className="text-xs text-red-400 mt-1.5">{productErrors.name}</p>}
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
+                <label className="block text-xs font-semibold text-th-text-3 uppercase tracking-wider mb-2">
                   Preço (R$)
                 </label>
                 <div className="relative">
@@ -503,37 +597,37 @@ export default function DashboardPage() {
                     value={productForm.price}
                     onChange={e => setProductForm(f => ({ ...f, price: maskCurrencyInput(e.target.value) }))}
                     placeholder="0,00"
-                    className={`w-full bg-zinc-950/80 border ${productErrors.price ? 'border-red-500' : 'border-zinc-700'} focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl pl-10 pr-4 py-3 text-sm text-zinc-200 placeholder-zinc-600 outline-none transition`}
+                    className={`w-full bg-th-bg/80 border ${productErrors.price ? 'border-red-500' : 'border-zinc-300 dark:border-zinc-700/50'} focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl pl-10 pr-4 py-3 text-sm text-th-text-2 placeholder-zinc-400 outline-none transition`}
                   />
                 </div>
                 {productErrors.price && <p className="text-xs text-red-400 mt-1.5">{productErrors.price}</p>}
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
-                  URL de entrega <span className="text-zinc-600 normal-case font-normal">(opcional)</span>
+                <label className="block text-xs font-semibold text-th-text-3 uppercase tracking-wider mb-2">
+                  URL de entrega <span className="text-th-text-4 normal-case font-normal">(opcional)</span>
                 </label>
                 <input
                   type="url"
                   value={productForm.delivery_url}
                   onChange={e => setProductForm(f => ({ ...f, delivery_url: e.target.value }))}
                   placeholder="https://membros.seusite.com/area"
-                  className="w-full bg-zinc-950/80 border border-zinc-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-4 py-3 text-sm text-zinc-200 placeholder-zinc-600 outline-none transition"
+                  className="w-full bg-th-bg/80 border border-zinc-300 dark:border-zinc-700/50 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-xl px-4 py-3 text-sm text-th-text-2 placeholder-zinc-400 outline-none transition"
                 />
-                <p className="text-xs text-zinc-600 mt-1.5">Enviado ao cliente após o pagamento ser confirmado.</p>
+                <p className="text-xs text-th-text-4 mt-1.5">Enviado ao cliente após o pagamento ser confirmado.</p>
               </div>
 
               {/* Toggle: cupom de desconto */}
-              <div className="flex items-center justify-between bg-zinc-950/40 border border-zinc-800 rounded-xl px-4 py-3">
+              <div className="flex items-center justify-between bg-th-bg/40 border border-zinc-200 dark:border-zinc-700/50 dark:border-zinc-800/50 rounded-xl px-4 py-3">
                 <div>
-                  <p className="text-sm font-medium text-zinc-200">Habilitar cupom de desconto</p>
+                  <p className="text-sm font-medium text-th-text-2">Habilitar cupom de desconto</p>
                   <p className="text-xs text-zinc-500 mt-0.5">Exibe campo de cupom no checkout deste produto.</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setProductForm(f => ({ ...f, allow_coupons: !f.allow_coupons }))}
                   className={`relative w-10 h-6 rounded-full transition-colors shrink-0 ml-4 ${
-                    productForm.allow_coupons ? 'bg-emerald-600' : 'bg-zinc-700'
+                    productForm.allow_coupons ? 'bg-emerald-600' : 'bg-th-muted'
                   }`}
                 >
                   <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${
@@ -546,7 +640,7 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => { setShowProduct(false); setProductErrors({}) }}
-                  className="flex-1 text-sm font-semibold text-zinc-400 hover:text-zinc-200 border border-zinc-700 hover:border-zinc-600 py-3 rounded-xl transition-colors"
+                  className="flex-1 text-sm font-semibold text-th-text-3 hover:text-th-text-2 border border-zinc-300 dark:border-zinc-700/50 hover:border-zinc-600 py-3 rounded-xl transition-colors"
                 >
                   Cancelar
                 </button>

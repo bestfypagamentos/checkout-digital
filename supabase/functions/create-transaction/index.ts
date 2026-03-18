@@ -10,7 +10,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { productId, customerName, customerEmail, customerCpf, customerPhone } = await req.json()
+    const { productId, customerName, customerEmail, customerCpf, customerPhone, couponCode, offerId } = await req.json()
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
@@ -19,16 +19,64 @@ serve(async (req) => {
 
     const { data: product, error: pError } = await supabase
       .from('products')
-      .select('*, profiles(bestfy_api_key)')
+      .select('*')
       .eq('id', productId)
       .single()
 
-    if (pError || !product?.profiles?.bestfy_api_key) {
+    if (pError || !product) {
+      throw new Error("Produto não encontrado.")
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('bestfy_api_key')
+      .eq('id', product.user_id)
+      .single()
+
+    if (profileError || !profile?.bestfy_api_key) {
       throw new Error("Configuração de pagamento do vendedor não encontrada.")
     }
 
-    const apiKey = product.profiles.bestfy_api_key
-    const priceInCents = Math.round(product.price * 100)
+    const apiKey = profile.bestfy_api_key
+
+    // Resolve offer price (if offerId provided)
+    let basePrice = product.price
+    if (offerId) {
+      const { data: offer } = await supabase
+        .from('product_offers')
+        .select('price')
+        .eq('id', offerId)
+        .eq('product_id', productId)
+        .single()
+      if (offer) basePrice = offer.price
+    }
+
+    // ── Validar e aplicar cupom (se fornecido) ───────────────────────────────
+    let finalPrice = basePrice
+    let couponId: string | null = null
+
+    if (couponCode) {
+      const { data: coupon } = await supabase
+        .from('coupons')
+        .select('id, discount_percent, starts_at, expires_at')
+        .eq('product_id', productId)
+        .eq('code', couponCode.trim().toUpperCase())
+        .single()
+
+      if (coupon) {
+        const now = new Date()
+        const startsOk = !coupon.starts_at || new Date(coupon.starts_at) <= now
+        const expiresOk = !coupon.expires_at || new Date(coupon.expires_at) >= now
+
+        if (startsOk && expiresOk) {
+          finalPrice = basePrice * (1 - coupon.discount_percent / 100)
+          couponId = coupon.id
+        }
+      }
+      // Se cupom não encontrado ou inválido, prossegue sem desconto
+    }
+
+    const priceInCents = Math.round(finalPrice * 100)
 
     // ESTRUTURA EXATA DA DOCUMENTAÇÃO QUE VOCÊ ENVIOU
     const payload = {
@@ -82,7 +130,9 @@ serve(async (req) => {
         qr_code_text:   result.qrCodeText,
         product_id:     product.id,
         seller_id:      product.user_id,
-        amount:         product.price,
+        amount:         finalPrice,
+        coupon_id:      couponId,
+        offer_id:       offerId || null,
         customer_name:  customerName,
         customer_email: customerEmail,
         customer_cpf:   customerCpf.replace(/\D/g, ''),

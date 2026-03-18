@@ -1,45 +1,44 @@
-# ⚡ Checkout Digital SaaS
+# ⚡ Checkout Digital
 
-Plataforma de vendas de infoprodutos com geração de PIX automático, confirmação de pagamento em tempo real e liberação de acesso instantânea — sem intervenção manual.
+> **SaaS de Checkout de Alta Conversão** — múltiplos modelos visuais por produto, gestão de ofertas, cupons de desconto, confirmação de pagamento via PIX em tempo real e Área de Membros integrada.
 
 ---
 
-## 📐 Arquitetura do Sistema
+## ✨ Principais Funcionalidades
 
-O sistema opera em um **triângulo de responsabilidades** bem definido:
+### 🎨 Sistema Multi-Checkout com Identidade Visual Independente
+Cada produto pode ter **N modelos de checkout**, cada um com sua própria combinação de cores, logomarca e temporizador. Um Checkout A pode ser verde com a logo da marca A, enquanto o Checkout B é azul com a logo da marca B — completamente isolados.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        FLUXO COMPLETO                           │
-│                                                                 │
-│  Cliente                 Supabase                   Bestfy      │
-│  ──────                  ────────                   ──────      │
-│  Preenche form  ──────►  Edge Function          ──► /payment    │
-│                          create-transaction                      │
-│                          (busca API Key do                       │
-│                           vendedor no banco)   ◄── QR Code PIX  │
-│                                                                 │
-│  Exibe QR Code  ◄──────  Salva em sales{}                       │
-│  (status=pending)        Retorna saleId                         │
-│                                                                 │
-│  ─ ─ ─ ─ cliente paga no banco ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
-│                                                                 │
-│                          Edge Function     ◄── POST webhook     │
-│                          bestfy-webhook        (status=PAID)    │
-│                          UPDATE sales                           │
-│                          status → 'paid'                        │
-│                                                                 │
-│  Tela "Pago!" ◄────────  Supabase Realtime                      │
-│  (automático)            (escuta o UPDATE)                      │
-└─────────────────────────────────────────────────────────────────┘
-```
+### 🔗 Gestão de Ofertas com Tabela de Junção
+Uma oferta pode pertencer a múltiplos checkouts simultaneamente. A arquitetura usa a tabela `checkout_offer_variants` para relacionar `product_offers ↔ product_checkouts` sem duplicação de dados.
+
+### 💸 PIX com Confirmação em Tempo Real
+O comprador paga e a tela muda sozinha — sem refresh. Alimentado por **Supabase Realtime** escutando o webhook da Bestfy via PostgreSQL Change Streams.
+
+### 🛡️ Anti-F5: Sessão Persistente
+O `saleId` é gravado na URL (`?sale=uuid`). Ao recarregar a página, o sistema restaura automaticamente o QR Code (se pendente) ou exibe a tela de confirmação (se pago).
+
+### 🎫 Cupons de Desconto
+Códigos com desconto percentual, data de início e expiração opcionais. Validados no frontend e reaplicados server-side na Edge Function `create-transaction` para segurança total.
+
+### 🔖 Múltiplas Ofertas por Produto
+Até 10 variações de preço por produto (pagamento único ou recorrente), com seletor visual no checkout público. Preço da oferta principal sincronizado bidirecionalmente com o preço do produto.
+
+### 🔗 Links de Venda por Combinação Oferta × Checkout
+Cada par oferta/checkout gera um link exclusivo com os parâmetros `?off=` e `?chk=` pré-selecionados, permitindo campanhas de marketing segmentadas.
+
+### 📊 Dashboard Dark Mode com Persistência de Abas
+Painel administrativo completo em dark mode. A aba ativa persiste na URL via `useSearchParams` — sobrevive a F5 e ao botão voltar do browser.
+
+### 🏗️ Multi-tenant por RLS
+Cada vendedor gerencia exclusivamente seus próprios dados. O Row Level Security do PostgreSQL garante isolamento total em nível de banco, sem filtros manuais no código.
 
 ---
 
 ## 🛠️ Stack Tecnológica
 
 | Camada | Tecnologia | Versão |
-|--------|-----------|--------|
+|---|---|---|
 | Frontend | React + Vite | 18 / 5 |
 | Estilização | Tailwind CSS | 3.4 |
 | Ícones | Lucide React | latest |
@@ -51,35 +50,62 @@ O sistema opera em um **triângulo de responsabilidades** bem definido:
 
 ---
 
-## ✨ Principais Funcionalidades
+## 🗄️ Arquitetura do Banco de Dados
 
-### 🔄 Realtime — Tela muda sozinha ao pagar
-Após gerar o PIX, o frontend abre um canal Supabase Realtime que escuta `UPDATE` na linha da venda:
-```javascript
-supabase
-  .channel(`sale-${saleId}`)
-  .on('postgres_changes', {
-    event: 'UPDATE', schema: 'public',
-    table: 'sales', filter: `id=eq.${saleId}`
-  }, (payload) => {
-    if (payload.new.status === 'paid') setPageState('confirmed')
-  })
-  .subscribe()
+### Visão Geral do Modelo Relacional
+
 ```
-Quando o webhook da Bestfy atualiza o banco, o cliente vê a tela de confirmação **sem precisar recarregar**.
-
-### 🛡️ Anti-F5 — Sessão recuperada após refresh
-O `saleId` é gravado diretamente na URL como query param:
+auth.users (Supabase Auth)
+    │
+    ├──► profiles          ← bestfy_api_key, nome da empresa
+    │
+    └──► products          ← nome, preço, imagem, delivery_url
+              │
+              ├──► product_offers         ← variações de preço (até 10)
+              │         │
+              │         └──► checkout_offer_variants  ← junção M:N
+              │                     │
+              ├──► product_checkouts ──┘   ← modelos visuais (settings JSONB)
+              │
+              ├──► coupons           ← cupons de desconto por produto
+              │
+              └──► sales             ← registro de cada transação
 ```
-/checkout/{productId}?sale={saleId}
+
+### Tabelas Principais
+
+| Tabela | Descrição |
+|---|---|
+| `profiles` | Dados do vendedor, `bestfy_api_key` |
+| `products` | Catálogo de produtos com imagem e link de entrega |
+| `product_offers` | Ofertas/variações de preço por produto |
+| `product_checkouts` | Modelos de checkout com `settings` JSONB (cores, logo, timer) |
+| `checkout_offer_variants` | Tabela de junção `offer_id ↔ checkout_id` (M:N) |
+| `coupons` | Cupons com desconto %, validade e restrições |
+| `sales` | Transações com status realtime e dados do comprador |
+
+### Detalhe: `product_checkouts.settings` (JSONB)
+
+Cada modelo de checkout armazena suas configurações visuais de forma independente:
+
+```json
+{
+  "logo_url":         "https://cdn.exemplo.com/logo-marca-a.png",
+  "logo_position":    "left",
+  "timer_seconds":    600,
+  "timer_bg_color":   "#EAB308",
+  "timer_text_color": "#713F12",
+  "button_color":     "#16A34A"
+}
 ```
-No `useEffect` de montagem, se `?sale=` existir, o sistema consulta o banco, restaura o QR Code (se `pending`) ou vai direto para a tela de obrigado (se `paid`). Nome e e-mail são pré-preenchidos automaticamente.
 
-### 🏗️ Multi-tenant por RLS
-Cada vendedor gerencia seus próprios produtos e vê apenas suas vendas. O Row Level Security do PostgreSQL garante isso em nível de banco — sem filtros manuais no código.
+### Detalhe: Link de Venda
 
-### ✅ Validação de API Key server-side
-A chave da Bestfy nunca é exposta no browser. A Edge Function `validate-bestfy` faz a chamada ao endpoint `/company/validate-api-key` server-side e retorna apenas o resultado.
+```
+/checkout/{productId}?off={offerId}&chk={checkoutId}
+```
+
+O checkout público carrega automaticamente a oferta e o modelo visual referenciados pelos params, garantindo a experiência visual correta para cada link de campanha.
 
 ---
 
@@ -89,27 +115,39 @@ A chave da Bestfy nunca é exposta no browser. A Edge Function `validate-bestfy`
 checkout-digital/
 ├── src/
 │   ├── lib/
-│   │   └── supabaseClient.js       # Inicialização do cliente Supabase
+│   │   ├── supabaseClient.js           # Inicialização do cliente Supabase
+│   │   └── cache.js                    # Helpers de cache client-side (SWR)
 │   ├── contexts/
-│   │   └── AuthContext.jsx         # Provider + hook useAuth
+│   │   └── AuthContext.jsx             # Provider + hook useAuth
 │   ├── components/
-│   │   ├── ProtectedRoute.jsx      # Guard para rotas autenticadas
-│   │   ├── DashboardLayout.jsx     # Layout com sidebar/nav do painel
-│   │   └── AuthLayout.jsx          # Layout das telas de login/cadastro
+│   │   ├── ProtectedRoute.jsx          # Guard para rotas autenticadas
+│   │   ├── DashboardLayout.jsx         # Layout com sidebar do painel
+│   │   ├── OnboardingGrid.jsx          # Checklist de onboarding do vendedor
+│   │   └── Skeleton.jsx                # Skeletons de loading
 │   └── pages/
 │       ├── LoginPage.jsx
 │       ├── RegisterPage.jsx
-│       ├── DashboardPage.jsx
-│       ├── ProductsPage.jsx        # CRUD de produtos + Copiar Link
-│       ├── IntegrationsPage.jsx    # Configuração da API Key Bestfy
-│       ├── TransactionsPage.jsx    # Histórico de vendas + modal QR Code
-│       └── CheckoutPage.jsx        # Página pública de checkout (PIX)
+│       ├── DashboardPage.jsx           # Dashboard com stats + criação de produto
+│       ├── ProductsPage.jsx            # CRUD de produtos
+│       ├── ProductEditPage.jsx         # Edição: Geral | Cupons | Checkout | Links
+│       ├── CheckoutEditor.jsx          # Editor visual por modelo de checkout
+│       ├── IntegrationsPage.jsx        # Configuração da API Key Bestfy
+│       ├── TransactionsPage.jsx        # Histórico de vendas + QR Code
+│       └── CheckoutPage.jsx            # Página pública de compra (PIX)
 ├── supabase/
 │   ├── migrations/
 │   │   ├── 001_create_products.sql
 │   │   ├── 002_create_profiles.sql
 │   │   ├── 003_create_sales.sql
-│   │   └── 004_update_sales_columns.sql
+│   │   ├── 004_update_sales_columns.sql
+│   │   ├── 005_add_allow_coupons.sql
+│   │   ├── 006_add_product_image.sql
+│   │   ├── 007_add_checkout_settings.sql
+│   │   ├── 008_create_coupons.sql
+│   │   ├── 009_create_product_offers.sql
+│   │   ├── 010_create_checkout_models.sql
+│   │   ├── 011_checkout_offer_variants.sql
+│   │   └── 012_add_settings_to_product_checkouts.sql
 │   └── functions/
 │       ├── validate-bestfy/index.ts
 │       ├── create-transaction/index.ts
@@ -120,149 +158,119 @@ checkout-digital/
 
 ---
 
-## 🗄️ Esquema do Banco de Dados
+## 🔄 Fluxo de Pagamento
 
-### `profiles` — Dados do vendedor
-```sql
-create table public.profiles (
-  id                   uuid primary key references auth.users(id) on delete cascade,
-  bestfy_api_key       text,
-  bestfy_company_name  text,
-  created_at           timestamptz not null default now(),
-  updated_at           timestamptz not null default now()
-);
 ```
-> Criado automaticamente via trigger `on_auth_user_created` ao registrar um novo usuário.
-
----
-
-### `products` — Catálogo de produtos do vendedor
-```sql
-create table public.products (
-  id            uuid primary key default gen_random_uuid(),
-  user_id       uuid not null references auth.users(id) on delete cascade,
-  name          text not null,
-  description   text,
-  price         numeric(10, 2) not null check (price > 0),
-  delivery_url  text,
-  created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now()
-);
+┌──────────────────────────────────────────────────────────────────┐
+│                         FLUXO COMPLETO                           │
+│                                                                  │
+│  Comprador              Supabase                   Bestfy        │
+│  ─────────              ────────                   ──────        │
+│  Preenche form  ──────► Edge Function           ──► /payment     │
+│                         create-transaction                        │
+│                         (busca API Key do                         │
+│                          vendedor no banco)    ◄── QR Code PIX   │
+│                                                                  │
+│  Exibe QR Code  ◄──────  Salva em sales{}                        │
+│  (status=pending)        Retorna saleId                          │
+│                                                                  │
+│  ─ ─ ─ ─ ─ ─ comprador paga no banco ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    │
+│                                                                  │
+│                          Edge Function     ◄── POST webhook      │
+│                          bestfy-webhook        (status=PAID)     │
+│                          UPDATE sales                            │
+│                          status → 'paid'                         │
+│                                                                  │
+│  Tela "Pago!" ◄─────────  Supabase Realtime                      │
+│  (automático)             (escuta o UPDATE)                      │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### `sales` — Registro completo de cada venda
-```sql
-create table public.sales (
-  id                  uuid primary key default gen_random_uuid(),
-  product_id          uuid references public.products(id) on delete set null,
-  seller_id           uuid not null references auth.users(id) on delete cascade,
+## 🛣️ Rotas da Aplicação
 
-  -- Dados da Bestfy
-  bestfy_id           text,                    -- financialTransactionId da Bestfy
-  qr_code_url         text,                    -- URL da imagem do QR Code
-  qr_code_text        text,                    -- Código PIX copia e cola
-
-  -- Status da venda
-  status              text not null default 'pending'
-                        check (status in ('pending', 'paid', 'failed', 'refunded')),
-  amount              numeric(10, 2) not null,
-
-  -- Dados do comprador
-  customer_name       text not null,
-  customer_email      text not null,
-  customer_cpf        text not null,
-  customer_phone      text,
-
-  created_at          timestamptz not null default now(),
-  updated_at          timestamptz not null default now()
-);
-
--- Índices
-create index sales_seller_id_idx  on public.sales(seller_id);
-create index sales_bestfy_id_idx  on public.sales(bestfy_id);
-create index sales_status_idx     on public.sales(status);
-```
-
-> **RLS**: O vendedor lê apenas `seller_id = auth.uid()`. O `INSERT` é feito exclusivamente via service role key nas Edge Functions, sem policy de insert para usuários.
+| Rota | Acesso | Descrição |
+|---|---|---|
+| `/login` | Público | Login do vendedor |
+| `/register` | Público | Cadastro do vendedor |
+| `/checkout/:productId` | Público | Página de compra do cliente |
+| `/dashboard` | Autenticado | Painel com stats e criação rápida de produto |
+| `/products` | Autenticado | Listagem e gerenciamento de produtos |
+| `/products/:id` | Autenticado | Edição: Geral, Cupons, Checkout, Links |
+| `/products/:id/checkout-editor/:checkoutId` | Autenticado | Editor visual isolado por modelo |
+| `/integrations` | Autenticado | Configurar chave da API Bestfy |
+| `/transactions` | Autenticado | Histórico de vendas com QR Code |
 
 ---
 
-## 🔧 Configuração do Ambiente
+## 🚀 Instalação e Configuração
 
-### 1. Variáveis de ambiente — Frontend (`.env`)
+### 1. Clone e instale as dependências
 
 ```bash
-# Copie o template
+git clone https://github.com/seu-usuario/checkout-digital.git
+cd checkout-digital
+npm install
+```
+
+### 2. Configure as variáveis de ambiente
+
+```bash
 cp .env.example .env
 ```
 
+Edite o `.env` com suas credenciais do Supabase:
+
 ```env
-VITE_SUPABASE_URL=https://SEU-PROJETO.supabase.co
+VITE_SUPABASE_URL=https://seu-projeto.supabase.co
 VITE_SUPABASE_ANON_KEY=sua-anon-key-aqui
+VITE_APP_URL=https://seu-dominio.com.br
 ```
 
-Encontre esses valores em: **Supabase Dashboard → Settings → API**.
+> `VITE_APP_URL` é usado para gerar os links de venda na aba **Links**. Em desenvolvimento, deixe `http://localhost:5173`.
 
-### 2. Secrets das Edge Functions — Supabase CLI
+### 3. Aplique as migrations no Supabase
 
-As funções usam variáveis injetadas automaticamente pelo Supabase:
+Execute cada arquivo em ordem no **Supabase Dashboard → SQL Editor**:
 
-| Variável | Origem | Uso |
-|----------|--------|-----|
-| `SUPABASE_URL` | Automático | URL do projeto |
-| `SUPABASE_SERVICE_ROLE_KEY` | Automático | Acesso admin ao banco (bypass RLS) |
+```
+001 → 002 → 003 → 004 → 005 → 006 → 007 → 008 → 009 → 010 → 011 → 012
+```
 
-> Nenhum secret manual é necessário — a API Key da Bestfy é buscada do banco em tempo de execução, por produto/vendedor.
-
----
-
-## 🚀 Guia de Deploy
-
-### Instalação local
+### 4. Deploy das Edge Functions
 
 ```bash
-npm install
-npm run dev
-```
-
-### Aplicar migrations no Supabase
-
-Execute cada arquivo SQL no **Supabase Dashboard → SQL Editor**:
-
-```
-001_create_products.sql
-002_create_profiles.sql
-003_create_sales.sql
-004_update_sales_columns.sql
-```
-
-### Deploy das Edge Functions
-
-```bash
-# Login na CLI
 supabase login
-
-# Vincula ao projeto remoto
 supabase link --project-ref SEU-PROJECT-REF
 
-# Deploy de cada função
 supabase functions deploy validate-bestfy
 supabase functions deploy create-transaction
 supabase functions deploy bestfy-webhook
 ```
 
-### Desativar JWT no Webhook
+> **Importante:** Desative a verificação JWT na função `bestfy-webhook`:
+> Supabase Dashboard → Edge Functions → bestfy-webhook → Settings → desmarcar **"Enforce JWT Verification"**
 
-A função `bestfy-webhook` recebe chamadas da Bestfy (sem JWT). Para isso:
+### 5. Inicie o servidor de desenvolvimento
 
-**Supabase Dashboard → Edge Functions → bestfy-webhook → Settings**
-→ Desmarque **"Enforce JWT Verification"**
+```bash
+npm run dev
+```
 
 ---
 
-## 🔗 Edge Functions
+## 🔐 Segurança
+
+- **RLS em todas as tabelas** — isolamento total entre vendedores no nível do banco
+- **API Key da Bestfy nunca exposta no browser** — buscada server-side pela Edge Function
+- **INSERT em `sales` apenas via service role** — compradores não criam registros diretamente
+- **Validação de cupons dupla** — frontend + server-side na Edge Function
+- **Checkout público com verificação cruzada** — `?sale=` valida `product_id + sale_id` juntos
+
+---
+
+## 🔧 Edge Functions
 
 ### `POST /validate-bestfy`
 Valida a API Key da Bestfy server-side antes de salvar no banco.
@@ -271,124 +279,63 @@ Valida a API Key da Bestfy server-side antes de salvar no banco.
 // Request
 { "apiKey": "bfy_live_..." }
 
-// Response 200
+// Response 200 — válida
 { "valid": true, "company": { "fantasyName": "Minha Empresa", "status": "ACTIVE" } }
 
-// Response 200 (inválida)
-{ "valid": false, "status": 401 }
+// Response 200 — inválida
+{ "valid": false }
 ```
 
----
-
 ### `POST /create-transaction`
-Cria uma cobrança PIX na Bestfy e registra a venda no banco.
+Cria cobrança PIX, aplica cupom/oferta e registra a venda.
 
 ```jsonc
 // Request
 {
-  "productId": "uuid",
-  "customerName": "João Silva",
+  "productId":     "uuid",
+  "customerName":  "João Silva",
   "customerEmail": "joao@email.com",
-  "customerCpf": "12345678901",
-  "customerPhone": "11999999999"
+  "customerCpf":   "12345678901",
+  "customerPhone": "11999999999",
+  "couponCode":    "PROMO10",   // opcional
+  "offerId":       "uuid"       // opcional
 }
 
 // Response 200
 {
   "financialTransactionId": "txn_xxx",
-  "qrCode": "https://...",           // URL da imagem
-  "qrCodeText": "00020126...",       // Código copia e cola
-  "saleId": "uuid-do-banco"          // ID da linha em public.sales
+  "qrCode":     "https://...",
+  "qrCodeText": "00020126...",
+  "saleId":     "uuid"
 }
 ```
 
-**Fluxo interno:**
-1. Busca o produto e a `bestfy_api_key` do vendedor em `profiles`
-2. Converte preço para centavos (`price * 100`)
-3. Chama `POST https://api.bestfy.io/payment` com `x-api-key`
-4. Insere linha em `sales` com `status = 'pending'`
-5. Retorna os dados da Bestfy + `saleId` gerado
-
----
-
 ### `POST /bestfy-webhook`
-Recebe notificações de status da Bestfy e atualiza o banco.
-
-**Fluxo técnico — Double Parse:**
-```typescript
-// O payload da Bestfy tem esta estrutura:
-// { event_message: "{\"transactionId\":\"txn_xxx\",\"status\":\"PAID\"}" }
-
-const body     = await req.json()
-const data     = body.event_message ? JSON.parse(body.event_message) : body
-const txnId    = data.transactionId || body.transactionId
-const rawStatus = data.status || body.status
-```
-
-**Mapeamento de status Bestfy → banco:**
+Recebe notificações de status da Bestfy e aciona o Realtime.
 
 | Status Bestfy | Status no banco |
-|--------------|-----------------|
+|---|---|
 | `PAID` / `APPROVED` / `COMPLETED` | `paid` |
 | `EXPIRED` | `expired` |
 | `FAILED` / `CANCELED` | `failed` |
 | `REFUNDED` | `refunded` |
-| outros | `pending` |
-
-URL configurada em `create-transaction`:
-```
-https://SEU-PROJETO.supabase.co/functions/v1/bestfy-webhook
-```
 
 ---
 
-## 🔄 Fluxo Completo — Do Clique ao "Pago"
+## 🗺️ Roadmap
 
-```
-1. Vendedor cadastra produto → /products
-2. Vendedor configura API Key Bestfy → /integrations
-   └── validate-bestfy valida a chave server-side
-   └── bestfy_api_key salvo em profiles
+### 🔜 Próximas Entregas
 
-3. Vendedor copia link → /checkout/{productId}
-   └── Link compartilhado com o comprador
-
-4. Comprador preenche form (nome, email, CPF, telefone)
-5. Frontend chama create-transaction
-   └── Função busca bestfy_api_key do vendedor
-   └── Chama api.bestfy.io/payment
-   └── Cria linha em sales (status=pending)
-   └── Retorna qrCode + saleId
-
-6. Frontend exibe QR Code
-   └── URL atualizada: /checkout/{productId}?sale={saleId}
-   └── Realtime ativo: escuta UPDATE em sales WHERE id={saleId}
-
-7. Comprador paga no banco
-
-8. Bestfy chama bestfy-webhook (POST)
-   └── Double Parse do payload
-   └── UPDATE sales SET status='paid' WHERE bestfy_id='{txnId}'
-
-9. Supabase Realtime dispara o evento
-   └── Frontend recebe payload.new.status === 'paid'
-   └── Tela muda automaticamente para "Pagamento Confirmado!"
-   └── Botão "Acessar meu Produto" exibe o delivery_url
-```
-
----
-
-## 🛣️ Rotas da Aplicação
-
-| Rota | Acesso | Descrição |
-|------|--------|-----------|
-| `/login` | Público | Login do vendedor |
-| `/register` | Público | Cadastro do vendedor |
-| `/checkout/:productId` | Público | Página de compra do cliente |
-| `/dashboard` | Autenticado | Painel principal |
-| `/products` | Autenticado | Gerenciar produtos |
-| `/integrations` | Autenticado | Configurar API Key Bestfy |
-| `/transactions` | Autenticado | Histórico de vendas |
+| # | Feature | Descrição |
+|---|---|---|
+| 1 | **Upsell de 1-Clique** | Oferta adicional exibida após confirmação do PIX, aceita sem novo preenchimento de dados |
+| 2 | **Área de Membros (LXP)** | Plataforma integrada de cursos e conteúdo com controle de acesso por produto/oferta |
+| 3 | **Order Bump** | Produto adicional exibido no checkout antes da finalização |
+| 4 | **Pixels de Rastreamento** | Integração com Meta Pixel e Google Tag Manager por produto |
+| 5 | **Abandono de Carrinho** | Webhook acionado quando o comprador não finaliza o checkout |
+| 6 | **Relatórios Avançados** | Gráficos de receita, taxa de conversão e ticket médio por produto |
+| 7 | **Checkout Embutido** | Widget iframe para incorporar o checkout em landing pages externas |
+| 8 | **Boleto / Cartão** | Suporte a múltiplos métodos de pagamento além do PIX |
 
 ---
 
@@ -415,13 +362,4 @@ https://SEU-PROJETO.supabase.co/functions/v1/bestfy-webhook
 
 ---
 
-## 🔐 Segurança
-
-- **RLS em todas as tabelas** — nenhum dado vaza entre vendedores
-- **API Key nunca exposta no browser** — validação e uso server-side via Edge Functions
-- **INSERT em `sales` apenas via service role** — clientes não podem criar vendas diretamente
-- **Checkout público com verificação cruzada** — `?sale=` valida `product_id` junto ao `sale_id`, impedindo acesso a vendas de outros produtos
-
----
-
-*Projeto desenvolvido com React, Supabase e integração Bestfy.*
+*Desenvolvido com React 18, Supabase e integração Bestfy PIX.*
