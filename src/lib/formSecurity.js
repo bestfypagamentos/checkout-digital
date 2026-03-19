@@ -66,6 +66,51 @@ export const STRENGTH_TEXT = [
   'text-emerald-400',
 ]
 
+// ── Validação de URL de redirecionamento (anti Open Redirect) ────────────────
+// Apenas HTTPS com hostname real — bloqueia javascript:, data:, file://, IPs, localhost.
+const BLOCKED_HOSTNAMES = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1'])
+const PRIVATE_IP_RE     = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/
+
+export function validateRedirectUrl(url) {
+  if (!url || url.trim() === '') return null  // campo vazio é permitido
+
+  let parsed
+  try {
+    parsed = new URL(url.trim())
+  } catch {
+    return 'URL inválida. Use o formato https://exemplo.com'
+  }
+
+  // Apenas HTTPS — bloqueia http://, javascript:, data:, file:, etc.
+  if (parsed.protocol !== 'https:') {
+    return 'A URL deve usar HTTPS (ex: https://exemplo.com).'
+  }
+
+  const host = parsed.hostname.toLowerCase()
+
+  // Bloqueia loopback e nomes reservados
+  if (BLOCKED_HOSTNAMES.has(host)) {
+    return 'URL de destino inválida.'
+  }
+
+  // Bloqueia faixas de IP privado (RFC 1918)
+  if (PRIVATE_IP_RE.test(host)) {
+    return 'URL de destino inválida.'
+  }
+
+  // Bloqueia hostnames sem ponto (ex: "intranet", "server") — não são domínios públicos
+  if (!host.includes('.')) {
+    return 'URL de destino inválida.'
+  }
+
+  // Limite de comprimento
+  if (url.trim().length > 2048) {
+    return 'URL muito longa (máximo 2048 caracteres).'
+  }
+
+  return null
+}
+
 // ── Honeypot ──────────────────────────────────────────────────────────────────
 // Campo invisível — bots preenchem, humanos não.
 export function isHoneypotFilled(value) {

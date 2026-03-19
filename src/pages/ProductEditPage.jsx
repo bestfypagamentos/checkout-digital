@@ -4,6 +4,7 @@ import { Loader2, ArrowLeft, ExternalLink, Copy, CheckCheck, ImagePlus, X, Paint
 import DashboardLayout from '../components/DashboardLayout'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from '../contexts/AuthContext'
+import { validateRedirectUrl } from '../lib/formSecurity'
 import {
   DndContext,
   closestCenter,
@@ -418,6 +419,7 @@ export default function ProductEditPage() {
   const [savingGen, setSavingGen]           = useState(false)
   const [generatedScript, setGeneratedScript] = useState('')
   const [showGenSuccess, setShowGenSuccess]   = useState(false)
+  const [genUrlErrors, setGenUrlErrors]       = useState({ accept_url: null, reject_url: null })
   const [scriptCopied, setScriptCopied]       = useState(false)
   const setG = (key, val) => setGenForm(s => ({ ...s, [key]: val }))
 
@@ -577,6 +579,21 @@ export default function ProductEditPage() {
 
   async function handleSaveGenerator() {
     if (!genForm.product_id) return
+
+    // ── Validação de URLs de redirecionamento (anti Open Redirect) ────────────
+    const acceptUrlErr = genForm.accept_action === 'offer_another'
+      ? validateRedirectUrl(genForm.accept_url)
+      : null
+    const rejectUrlErr = genForm.reject_action === 'offer_another'
+      ? validateRedirectUrl(genForm.reject_url)
+      : null
+
+    if (acceptUrlErr || rejectUrlErr) {
+      setGenUrlErrors({ accept_url: acceptUrlErr, reject_url: rejectUrlErr })
+      return
+    }
+    setGenUrlErrors({ accept_url: null, reject_url: null })
+
     setSavingGen(true)
 
     const payload = {
@@ -3035,15 +3052,27 @@ export default function ProductEditPage() {
                   <option value="offer_another">Oferecer outra upsell</option>
                 </select>
                 {genForm.accept_action === 'offer_another' && (
-                  <div className="relative">
-                    <ExternalLink className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none" />
-                    <input
-                      type="url"
-                      value={genForm.accept_url}
-                      onChange={e => setG('accept_url', e.target.value)}
-                      placeholder="https://..."
-                      className="w-full bg-zinc-800 border border-zinc-700/50 text-white text-sm rounded-lg pl-9 pr-3 py-2.5 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-all"
-                    />
+                  <div className="space-y-1">
+                    <div className="relative">
+                      <ExternalLink className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none" />
+                      <input
+                        type="url"
+                        value={genForm.accept_url}
+                        onChange={e => {
+                          setG('accept_url', e.target.value)
+                          setGenUrlErrors(prev => ({ ...prev, accept_url: validateRedirectUrl(e.target.value) }))
+                        }}
+                        placeholder="https://..."
+                        className={`w-full bg-zinc-800 border text-white text-sm rounded-lg pl-9 pr-3 py-2.5 placeholder-zinc-600 focus:outline-none focus:ring-2 transition-all ${
+                          genUrlErrors.accept_url
+                            ? 'border-red-500/60 focus:ring-red-500/40'
+                            : 'border-zinc-700/50 focus:ring-emerald-500/40 focus:border-emerald-500/60'
+                        }`}
+                      />
+                    </div>
+                    {genUrlErrors.accept_url && (
+                      <p className="text-xs text-red-400">{genUrlErrors.accept_url}</p>
+                    )}
                   </div>
                 )}
 
@@ -3078,15 +3107,27 @@ export default function ProductEditPage() {
                   <option value="offer_another">Oferecer outra downsell</option>
                 </select>
                 {genForm.reject_action === 'offer_another' && (
-                  <div className="relative">
-                    <ExternalLink className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none" />
-                    <input
-                      type="url"
-                      value={genForm.reject_url}
-                      onChange={e => setG('reject_url', e.target.value)}
-                      placeholder="https://..."
-                      className="w-full bg-zinc-800 border border-zinc-700/50 text-white text-sm rounded-lg pl-9 pr-3 py-2.5 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-all"
-                    />
+                  <div className="space-y-1">
+                    <div className="relative">
+                      <ExternalLink className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none" />
+                      <input
+                        type="url"
+                        value={genForm.reject_url}
+                        onChange={e => {
+                          setG('reject_url', e.target.value)
+                          setGenUrlErrors(prev => ({ ...prev, reject_url: validateRedirectUrl(e.target.value) }))
+                        }}
+                        placeholder="https://..."
+                        className={`w-full bg-zinc-800 border text-white text-sm rounded-lg pl-9 pr-3 py-2.5 placeholder-zinc-600 focus:outline-none focus:ring-2 transition-all ${
+                          genUrlErrors.reject_url
+                            ? 'border-red-500/60 focus:ring-red-500/40'
+                            : 'border-zinc-700/50 focus:ring-emerald-500/40 focus:border-emerald-500/60'
+                        }`}
+                      />
+                    </div>
+                    {genUrlErrors.reject_url && (
+                      <p className="text-xs text-red-400">{genUrlErrors.reject_url}</p>
+                    )}
                   </div>
                 )}
 

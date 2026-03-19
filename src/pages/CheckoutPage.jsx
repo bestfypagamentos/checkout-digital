@@ -54,6 +54,9 @@ export default function CheckoutPage() {
   const countdown                       = useCountdown(cs.timer_seconds)
 
   const [pageState, setPageState]         = useState('loading')
+  // Chave de idempotência gerada uma vez por sessão de checkout.
+  // Enviada via header X-Idempotency-Key para impedir cobranças duplicadas em cliques repetidos.
+  const idempotencyKey = useRef(crypto.randomUUID())
   const [product, setProduct]             = useState(null)
   const [sellerName, setSellerName]       = useState('')
   const [form, setForm]                   = useState({ name: '', email: '', cpf: '', phone: '' })
@@ -80,7 +83,7 @@ export default function CheckoutPage() {
     async function init() {
       const { data: prod, error: prodErr } = await supabase
         .from('products')
-        .select('id, name, description, price, delivery_url, user_id, allow_coupons, image_url')
+        .select('id, name, description, price, user_id, allow_coupons, image_url')
         .eq('id', productId)
         .single()
 
@@ -117,8 +120,6 @@ export default function CheckoutPage() {
         setProductOffers(offersData)
         setSelectedOffer(offersData[0])
       }
-
-      setDeliveryUrl(prod.delivery_url || '')
 
       // Carrega settings do checkout específico (via ?chk=) ou fallback para o padrão
       const checkoutId = searchParams.get('chk')
@@ -205,6 +206,17 @@ export default function CheckoutPage() {
     return () => { if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null } }
   }, [saleId])
 
+  // ── Busca URL de entrega apenas após pagamento confirmado (C-02 + C-03) ───
+  // A delivery_url nunca é carregada no init — só é liberada via Edge Function
+  // após verificar que sale.status === 'paid' no servidor.
+  // A sessão anônima criada em handleSubmit garante o JWT para autenticação.
+  useEffect(() => {
+    if (pageState !== 'confirmed' || !saleId) return
+    supabase.functions.invoke('get-delivery-url', { body: { saleId } })
+      .then(({ data }) => { if (data?.deliveryUrl) setDeliveryUrl(data.deliveryUrl) })
+      .catch(() => {/* URL de entrega não crítica — silencioso */})
+  }, [pageState, saleId])
+
   // ── Aplicar cupom ─────────────────────────────────────────────────────────
   async function handleApplyCoupon() {
     if (!coupon.trim()) return
@@ -259,23 +271,36 @@ export default function CheckoutPage() {
     setPageState('paying')
     setErrorMsg('')
 
-    const { data, error } = await supabase.functions.invoke('create-transaction', {
+    // C-03: Garante sessão anônima — o JWT resultante autentica a Edge Function.
+    // Requer "Anonymous sign-ins" habilitado em Auth → Settings no Supabase Dashboard.
+    const { data: sessionData } = await supabase.auth.getSession()
+    if (!sessionData?.session) {
+      const { error: anonError } = await supabase.auth.signInAnonymously()
+      if (anonError) {
+        console.error('[auth] signInAnonymously falhou:', anonError.message)
+        setPageState('ready')
+        setErrorMsg('Não foi possível iniciar a sessão. Verifique sua conexão e tente novamente.')
+        return
+      }
+    }
+
+    const { data, error: fnError } = await supabase.functions.invoke('create-transaction', {
       body: {
         productId,
-        quantity,
-        customerName:  form.name,
-        customerEmail: form.email,
-        customerCpf:   form.cpf,
-        customerPhone: form.phone.replace(/\D/g, ''),
-        couponCode:    couponApplied?.code || null,
-        offerId:       selectedOffer?.id || null,
+        customerName:   form.name,
+        customerEmail:  form.email,
+        customerCpf:    form.cpf,
+        customerPhone:  form.phone.replace(/\D/g, ''),
+        couponCode:     couponApplied?.code || null,
+        offerId:        selectedOffer?.id   || null,
+        idempotencyKey: idempotencyKey.current,
       },
     })
 
-    if (error || data?.error || !data?.qrCodeText) {
+    if (fnError || data?.error || !data?.qrCodeText) {
       setPageState('ready')
       setErrorMsg(
-        data?.error === 'Configuração de pagamento do vendedor não encontrada.'
+        data?.error === 'Gateway de pagamento não configurado.'
           ? 'Este checkout ainda não está disponível para pagamentos.'
           : 'Não foi possível gerar o pagamento. Tente novamente.'
       )
