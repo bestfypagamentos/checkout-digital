@@ -25,7 +25,7 @@ function Badge({ type }) {
 }
 
 // ── Card grande ───────────────────────────────────────────────────────────────
-function LargeCard({ step, icon: Icon, iconColor, iconBg, iconNode, title, description, badge, action }) {
+function LargeCard({ step, icon: Icon, iconColor, iconBg, iconNode, title, titleHref, description, badge, action }) {
   return (
     <div className="relative bg-th-raised border border-th-line rounded-xl p-6 flex flex-col gap-4 group hover:border-th-line-2 transition-all duration-200">
 
@@ -44,7 +44,13 @@ function LargeCard({ step, icon: Icon, iconColor, iconBg, iconNode, title, descr
         <p className="text-[10px] font-bold text-th-text-4 uppercase tracking-widest mb-1.5">
           Passo {String(step).padStart(2, '0')}
         </p>
-        <h3 className="text-sm font-semibold text-th-text leading-snug">{title}</h3>
+        <h3 className="text-sm font-semibold text-th-text leading-snug">
+          {titleHref ? (
+            <a href={titleHref} target="_blank" rel="noopener noreferrer" className="hover:text-emerald-400 transition-colors">
+              {title}
+            </a>
+          ) : title}
+        </h3>
         <p className="text-xs text-th-text-3 mt-2 leading-relaxed">{description}</p>
       </div>
 
@@ -113,7 +119,8 @@ export default function OnboardingGrid({
         <LargeCard
           step={1}
           iconNode={<BestfyIcon size={44} />}
-          title="Conectar Gateway de Pagamento"
+          title="Conectar Bestfy.io"
+          titleHref="https://app.bestfy.io"
           description="Vincule sua conta Bestfy para começar a receber pagamentos via PIX de forma automática."
           badge={hasApiKey ? 'done' : 'pending'}
           action={{ label: 'Conectar Bestfy', onClick: onConnectBestfy }}

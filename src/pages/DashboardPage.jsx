@@ -397,66 +397,6 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* ── Produtos recentes ── */}
-      {(productsLoading || products.length > 0) && (
-        <div className="th-card bg-th-surface border border-th-line rounded-xl overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-th-line">
-            <h2 className="text-sm font-semibold text-th-text-2 uppercase tracking-wider">
-              Produtos Recentes
-            </h2>
-            {!productsLoading && (
-              <button
-                onClick={() => navigate('/products')}
-                className="text-xs text-zinc-500 hover:text-th-text-2 flex items-center gap-1 transition-colors"
-              >
-                Ver todos <ExternalLink className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-
-          <div className="divide-y divide-th-line">
-            {productsLoading
-              ? Array.from({ length: 4 }).map((_, i) => <SkeletonProductListItem key={i} />)
-              : products.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between px-5 py-3.5 hover:bg-th-raised/40 transition-colors">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-th-text truncate">{p.name}</p>
-                      <p className="text-xs text-zinc-500 mt-0.5">{formatBRL(p.price)}</p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0 ml-4">
-                      <button
-                        onClick={() => copyLink(p.id)}
-                        className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-th-text-2 border border-zinc-300 dark:border-zinc-700/50 hover:border-zinc-600 rounded-lg px-3 py-1.5 transition-colors"
-                      >
-                        {copiedId === p.id
-                          ? <><Check className="w-3 h-3 text-emerald-400" /> Copiado</>
-                          : <><Copy className="w-3 h-3" /> Link</>
-                        }
-                      </button>
-                      <button
-                        onClick={() => navigate(`/checkout/${p.id}`)}
-                        className="text-xs text-zinc-500 hover:text-th-text-2 border border-zinc-300 dark:border-zinc-700/50 hover:border-zinc-600 rounded-lg px-3 py-1.5 transition-colors"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-                ))
-            }
-
-            {!productsLoading && (
-              <div className="px-5 py-3">
-                <button
-                  onClick={() => setShowProduct(true)}
-                  className="flex items-center gap-2 text-xs text-emerald-400 hover:text-emerald-300 font-medium transition-colors"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Adicionar produto
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* ════════════════════════════════════════════════
           Modal: Integração Bestfy

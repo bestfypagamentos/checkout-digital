@@ -25,7 +25,17 @@ const TABS = [
   { id: 'checkout', label: 'Checkout' },
   { id: 'links',    label: 'Links' },
   { id: 'bumps',    label: 'Order Bump' },
+  { id: 'upsell',   label: 'Upsell / Downsell' },
 ]
+
+const EMPTY_UPSELL = {
+  has_custom_redirect:      false,
+  redirect_url:             '',
+  ignore_bump_failures:     false,
+  send_confirmation_email:  false,
+  email_timing:             'immediate',
+  email_delay_minutes:      1,
+}
 
 // ─── Skeleton primitives ─────────────────────────────────────────────────────
 function Sk({ w = 'w-full', h = 'h-4', round = 'rounded-lg', extra = '' }) {
@@ -137,6 +147,22 @@ function CuponsSkeleton() {
             <Sk w="w-7" h="h-7" round="rounded-lg" />
             <Sk w="w-7" h="h-7" round="rounded-lg" />
           </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function UpsellSkeleton() {
+  return (
+    <div className="max-w-2xl space-y-4">
+      {[...Array(3)].map((_, i) => (
+        <div key={i} className="bg-th-surface border border-zinc-200 dark:border-zinc-800/50 rounded-xl p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <Sk w="w-2/3" h="h-4" />
+            <Sk w="w-10" h="h-6" round="rounded-full" extra="shrink-0" />
+          </div>
+          {i === 0 && <Sk w="w-full" h="h-10" round="rounded-lg" />}
         </div>
       ))}
     </div>
@@ -365,6 +391,36 @@ export default function ProductEditPage() {
   const [loadingBumpOffers, setLoadingBumpOffers] = useState(false)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
+  // ─── Upsell / Downsell ────────────────────────────────────────────────────
+  const [upsell, setUpsell]             = useState(EMPTY_UPSELL)
+  const [savingUpsell, setSavingUpsell] = useState(false)
+  const [upsellSaved, setUpsellSaved]   = useState(false)
+  const setU = (key, val) => setUpsell(s => ({ ...s, [key]: val }))
+
+  // ─── Gerador de Upsell ────────────────────────────────────────────────────
+  const EMPTY_GEN = {
+    product_id:    '',
+    offer_id:      '',
+    type:          'upsell',
+    accept_action: 'redirect_members',
+    accept_url:    '',
+    reject_action: 'redirect_members',
+    reject_url:    '',
+    accept_text:   'Sim! Eu quero essa oferta especial!',
+    reject_text:   'Não, obrigado. Não quero essa oferta.',
+    accept_color:  '#10b981',
+  }
+  const [showGenerator, setShowGenerator]   = useState(false)
+  const [genForm, setGenForm]               = useState(EMPTY_GEN)
+  const [genProducts, setGenProducts]       = useState([])
+  const [genOffers, setGenOffers]           = useState([])
+  const [loadingGenOffers, setLoadingGenOffers] = useState(false)
+  const [savingGen, setSavingGen]           = useState(false)
+  const [generatedScript, setGeneratedScript] = useState('')
+  const [showGenSuccess, setShowGenSuccess]   = useState(false)
+  const [scriptCopied, setScriptCopied]       = useState(false)
+  const setG = (key, val) => setGenForm(s => ({ ...s, [key]: val }))
+
   // ─── Load product ────────────────────────────────────────────────────────────
   useEffect(() => {
     async function load() {
@@ -389,6 +445,9 @@ export default function ProductEditPage() {
         image_url:     data.image_url || null,
       })
       setGuarantee(data.guarantee_days ? String(data.guarantee_days) : '')
+      if (data.upsell_settings && Object.keys(data.upsell_settings).length > 0) {
+        setUpsell({ ...EMPTY_UPSELL, ...data.upsell_settings })
+      }
       setLoading(false)
     }
     load()
@@ -397,8 +456,8 @@ export default function ProductEditPage() {
   // ─── Desativa skeleton de transição quando o conteúdo do tab está pronto ──
   useEffect(() => {
     if (!tabSwitching) return
-    if (tab === 'geral') {
-      // Geral não tem loading async — exibe skeleton brevemente
+    if (tab === 'geral' || tab === 'upsell') {
+      // Estas tabs não têm loading async — exibe skeleton brevemente
       const t = setTimeout(() => setTabSwitching(false), 300)
       return () => clearTimeout(t)
     }
@@ -484,6 +543,97 @@ export default function ProductEditPage() {
     }
     setLoadingOffers(false)
     setOffersLoaded(true)
+  }
+
+  // ─── Gerador de Upsell — funções ────────────────────────────────────────
+  async function openGenerator() {
+    setGenForm(EMPTY_GEN)
+    setGenOffers([])
+    setGeneratedScript('')
+    // Carrega todos os produtos do seller
+    const { data } = await supabase
+      .from('products')
+      .select('id, name')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+    setGenProducts(data || [])
+    setShowGenerator(true)
+  }
+
+  async function handleGenProductChange(productId) {
+    setG('product_id', productId)
+    setG('offer_id', '')
+    setGenOffers([])
+    if (!productId) return
+    setLoadingGenOffers(true)
+    const { data } = await supabase
+      .from('product_offers')
+      .select('id, name, price')
+      .eq('product_id', productId)
+      .order('is_main', { ascending: false })
+    setGenOffers(data || [])
+    setLoadingGenOffers(false)
+  }
+
+  async function handleSaveGenerator() {
+    if (!genForm.product_id) return
+    setSavingGen(true)
+
+    const payload = {
+      seller_id:     user.id,
+      product_id:    genForm.product_id,
+      offer_id:      genForm.offer_id || null,
+      type:          genForm.type,
+      accept_action: genForm.accept_action,
+      accept_url:    genForm.accept_action === 'offer_another' ? genForm.accept_url : null,
+      reject_action: genForm.reject_action,
+      reject_url:    genForm.reject_action === 'offer_another' ? genForm.reject_url : null,
+      accept_text:   genForm.accept_text,
+      reject_text:   genForm.reject_text,
+      accept_color:  genForm.accept_color,
+    }
+
+    const { data, error } = await supabase
+      .from('product_upsells')
+      .insert(payload)
+      .select('id')
+      .single()
+
+    if (!error && data) {
+      const baseUrl = import.meta.env.VITE_APP_URL || 'http://localhost:5173'
+      const acceptUrl = genForm.accept_action === 'offer_another' ? genForm.accept_url : ''
+      const rejectUrl = genForm.reject_action === 'offer_another' ? genForm.reject_url : ''
+
+      const script = `<!-- Bestfy Upsell Widget -->
+<script src="${baseUrl}/upsell-widget.js"><\/script>
+
+<bestfy-upsell
+  app-base-url="${baseUrl}"
+  upsell-id="${data.id}"
+  offer-id="${genForm.offer_id || ''}"
+  type="${genForm.type}"
+  accept-action="${genForm.accept_action}"${acceptUrl ? `\n  accept-url="${acceptUrl}"` : ''}
+  reject-action="${genForm.reject_action}"${rejectUrl ? `\n  reject-url="${rejectUrl}"` : ''}
+  accept-text="${genForm.accept_text}"
+  reject-text="${genForm.reject_text}"
+  accept-color="${genForm.accept_color}"
+></bestfy-upsell>`
+
+      setGeneratedScript(script)
+      setShowGenerator(false)
+      setShowGenSuccess(true)
+    }
+
+    setSavingGen(false)
+  }
+
+  // ─── Upsell save ─────────────────────────────────────────────────────────
+  async function handleSaveUpsell() {
+    setSavingUpsell(true)
+    await supabase.from('products').update({ upsell_settings: upsell }).eq('id', id)
+    setSavingUpsell(false)
+    setUpsellSaved(true)
+    setTimeout(() => setUpsellSaved(false), 3000)
   }
 
   // ─── Order Bump functions ────────────────────────────────────────────────
@@ -1092,10 +1242,207 @@ export default function ProductEditPage() {
 
       {/* ── Skeleton de transição entre tabs ── */}
       {tabSwitching && tab === 'geral'    && <GeralSkeleton />}
+      {tabSwitching && tab === 'upsell'   && <UpsellSkeleton />}
       {tabSwitching && tab === 'cupons'   && <CuponsSkeleton />}
       {tabSwitching && tab === 'checkout' && <CheckoutTableSkeleton />}
       {tabSwitching && tab === 'links'    && <LinksTableSkeleton />}
       {tabSwitching && tab === 'bumps'    && <BumpsSkeleton />}
+
+      {/* ── Tab: Upsell / Downsell ── */}
+      {!tabSwitching && tab === 'upsell' && (
+        <div className="max-w-2xl space-y-4">
+
+          {/* ── Redirecionamento ── */}
+          <div className="bg-th-surface border border-zinc-200 dark:border-zinc-800/50 rounded-xl p-5 space-y-4">
+            <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Redirecionamento pós-compra</p>
+
+            {/* Toggle: página de obrigado personalizada */}
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-th-text-2">Esse produto tem uma página de obrigado personalizada ou upsell</p>
+                <p className="text-xs text-zinc-500 mt-0.5">Redireciona o comprador após o pagamento ser aprovado.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setU('has_custom_redirect', !upsell.has_custom_redirect)}
+                aria-checked={upsell.has_custom_redirect}
+                role="switch"
+                className={`relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                  upsell.has_custom_redirect ? 'bg-emerald-600' : 'bg-zinc-600'
+                }`}
+              >
+                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all duration-200 ${upsell.has_custom_redirect ? 'left-5' : 'left-1'}`} />
+              </button>
+            </div>
+
+            {/* Conteúdo expandido quando toggle ativo */}
+            {upsell.has_custom_redirect && (
+              <div className="space-y-3 pt-1 border-t border-zinc-200 dark:border-zinc-800/50">
+                {/* Input de URL */}
+                <div>
+                  <label className="label">Cartão ou Pix aprovado</label>
+                  <div className="relative">
+                    <ExternalLink className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none" />
+                    <input
+                      type="url"
+                      value={upsell.redirect_url}
+                      onChange={e => setU('redirect_url', e.target.value)}
+                      placeholder="https://"
+                      className="input-field pl-10"
+                    />
+                  </div>
+                </div>
+                {/* Gerador de Upsell */}
+                <div className="flex items-center justify-between gap-4 bg-th-raised/60 border border-zinc-200 dark:border-zinc-700/40 rounded-xl px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium text-th-text-2">Gerador de Upsell</p>
+                    <p className="text-xs text-zinc-500 mt-0.5">Crie funis de upsell e downsell com redirecionamento automático.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openGenerator}
+                    className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-3.5 py-2 rounded-lg transition-colors shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Criar funil
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Toggle: ignorar falhas de order bumps */}
+            <div className="flex items-start justify-between gap-4 pt-1 border-t border-zinc-200 dark:border-zinc-800/50">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-th-text-2">Redirecionar upsell ignorando falhas nos pagamentos de order bumps</p>
+                <p className="text-xs text-zinc-500 mt-0.5">O comprador será redirecionado mesmo se o order bump falhar.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setU('ignore_bump_failures', !upsell.ignore_bump_failures)}
+                aria-checked={upsell.ignore_bump_failures}
+                role="switch"
+                className={`relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                  upsell.ignore_bump_failures ? 'bg-emerald-600' : 'bg-zinc-600'
+                }`}
+              >
+                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all duration-200 ${upsell.ignore_bump_failures ? 'left-5' : 'left-1'}`} />
+              </button>
+            </div>
+          </div>
+
+          {/* ── E-mail de Confirmação ── */}
+          <div className="bg-th-surface border border-zinc-200 dark:border-zinc-800/50 rounded-xl p-5 space-y-4">
+            <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">E-mail de confirmação</p>
+
+            {/* Toggle: enviar e-mail */}
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-th-text-2">Esse produto vai enviar um e-mail de confirmação</p>
+                <p className="text-xs text-zinc-500 mt-0.5">Notifica o comprador automaticamente após a compra.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setU('send_confirmation_email', !upsell.send_confirmation_email)}
+                aria-checked={upsell.send_confirmation_email}
+                role="switch"
+                className={`relative w-10 h-6 rounded-full transition-colors duration-200 shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                  upsell.send_confirmation_email ? 'bg-emerald-600' : 'bg-zinc-600'
+                }`}
+              >
+                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all duration-200 ${upsell.send_confirmation_email ? 'left-5' : 'left-1'}`} />
+              </button>
+            </div>
+
+            {/* Opções de timing — só visíveis quando toggle está ativo */}
+            {upsell.send_confirmation_email && (
+              <div className="space-y-4 pt-1 border-t border-zinc-200 dark:border-zinc-800/50">
+
+                {/* Radio buttons */}
+                <div className="space-y-2.5">
+                  {[
+                    { value: 'immediate',    label: 'Enviar imediatamente após o pagamento' },
+                    { value: 'after_upsell', label: 'Enviar após concluir as ofertas de upsell' },
+                  ].map(opt => (
+                    <label key={opt.value} className="flex items-center gap-3 cursor-pointer group">
+                      <div
+                        onClick={() => setU('email_timing', opt.value)}
+                        className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
+                          upsell.email_timing === opt.value
+                            ? 'border-emerald-500 bg-emerald-500'
+                            : 'border-zinc-400 bg-transparent group-hover:border-emerald-400'
+                        }`}
+                      >
+                        {upsell.email_timing === opt.value && (
+                          <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                        )}
+                      </div>
+                      <span
+                        onClick={() => setU('email_timing', opt.value)}
+                        className="text-sm text-th-text-2"
+                      >
+                        {opt.label}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+
+                {/* Contador de minutos */}
+                {upsell.email_timing === 'after_upsell' && (
+                  <div className="space-y-2">
+                    <label className="label">Quantos minutos deseja atrasar o envio?</label>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setU('email_delay_minutes', Math.max(1, upsell.email_delay_minutes - 1))}
+                        className="w-9 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center transition-colors font-bold text-lg shrink-0"
+                      >
+                        −
+                      </button>
+                      <span className="w-10 text-center text-sm font-bold text-th-text tabular-nums">
+                        {upsell.email_delay_minutes}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setU('email_delay_minutes', Math.min(60, upsell.email_delay_minutes + 1))}
+                        className="w-9 h-9 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center transition-colors font-bold text-lg shrink-0"
+                      >
+                        +
+                      </button>
+                      <span className="text-sm text-zinc-500">Minutos</span>
+                    </div>
+
+                    {/* Aviso */}
+                    <div className="flex items-start gap-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 mt-1">
+                      <span className="text-amber-400 text-base shrink-0 mt-0.5">⚠️</span>
+                      <p className="text-xs text-amber-600 dark:text-amber-400 leading-relaxed">
+                        O e-mail será enviado após o tempo definido, permitindo que o cliente finalize as ofertas de upsell.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ── Botão Salvar ── */}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={handleSaveUpsell}
+              disabled={savingUpsell}
+              className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"
+            >
+              {savingUpsell
+                ? <><Loader2 className="w-4 h-4 animate-spin" /> Salvando...</>
+                : upsellSaved
+                  ? '✓ Salvo!'
+                  : 'Salvar alterações'
+              }
+            </button>
+          </div>
+
+        </div>
+      )}
 
       {/* ── Tab: Geral ── */}
       {!tabSwitching && tab === 'geral' && (
@@ -2605,6 +2952,284 @@ export default function ProductEditPage() {
           </div>
         )
       })()}
+      {/* ══ Modal: Gerador de Upsell ══════════════════════════════════════════ */}
+      {showGenerator && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-lg bg-zinc-900 border border-zinc-700/50 rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-700/50 shrink-0">
+              <div>
+                <h2 className="text-sm font-bold text-white">Gerador de Upsell</h2>
+                <p className="text-xs text-zinc-500 mt-0.5">Configure o funil de vendas do seu produto</p>
+              </div>
+              <button
+                onClick={() => setShowGenerator(false)}
+                className="text-zinc-500 hover:text-zinc-300 transition-colors p-1 rounded-lg hover:bg-zinc-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+
+              {/* ── Produto + Oferta + Tipo ── */}
+              <div className="space-y-3">
+                {/* Select: Produto */}
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">Produto</label>
+                  <select
+                    value={genForm.product_id}
+                    onChange={e => handleGenProductChange(e.target.value)}
+                    className="w-full bg-zinc-800 border border-zinc-700/50 text-white text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60"
+                  >
+                    <option value="">Selecione um produto...</option>
+                    {genProducts.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Select: Oferta */}
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">Oferta</label>
+                  <select
+                    value={genForm.offer_id}
+                    onChange={e => setG('offer_id', e.target.value)}
+                    disabled={!genForm.product_id || loadingGenOffers}
+                    className="w-full bg-zinc-800 border border-zinc-700/50 text-white text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <option value="">
+                      {loadingGenOffers ? 'Carregando...' : 'Selecione uma oferta...'}
+                    </option>
+                    {genOffers.map(o => (
+                      <option key={o.id} value={o.id}>
+                        {o.name} — {Number(o.price).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Select: Tipo */}
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">Tipo de Oferta</label>
+                  <select
+                    value={genForm.type}
+                    onChange={e => setG('type', e.target.value)}
+                    className="w-full bg-zinc-800 border border-zinc-700/50 text-white text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60"
+                  >
+                    <option value="upsell">Upsell</option>
+                    <option value="downsell">Downsell</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* ── Ao Aceitar ── */}
+              <div className="bg-zinc-800/60 border border-zinc-700/40 rounded-xl p-4 space-y-3">
+                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Ao Aceitar</p>
+                <select
+                  value={genForm.accept_action}
+                  onChange={e => setG('accept_action', e.target.value)}
+                  className="w-full bg-zinc-800 border border-zinc-700/50 text-white text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                >
+                  <option value="offer_another">Oferecer outra upsell</option>
+                </select>
+                {genForm.accept_action === 'offer_another' && (
+                  <div className="relative">
+                    <ExternalLink className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none" />
+                    <input
+                      type="url"
+                      value={genForm.accept_url}
+                      onChange={e => setG('accept_url', e.target.value)}
+                      placeholder="https://..."
+                      className="w-full bg-zinc-800 border border-zinc-700/50 text-white text-sm rounded-lg pl-9 pr-3 py-2.5 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-all"
+                    />
+                  </div>
+                )}
+
+                {/* Texto do botão aceitar */}
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={genForm.accept_text}
+                    onChange={e => setG('accept_text', e.target.value)}
+                    placeholder="Texto do botão aceitar"
+                    className="flex-1 bg-zinc-800 border border-zinc-700/50 text-white text-sm rounded-lg px-3 py-2 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                  />
+                  <div className="relative w-10 h-10 rounded-lg overflow-hidden border border-zinc-700/50 shrink-0">
+                    <input
+                      type="color"
+                      value={genForm.accept_color}
+                      onChange={e => setG('accept_color', e.target.value)}
+                      className="absolute -inset-1 w-14 h-14 cursor-pointer"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Ao Rejeitar ── */}
+              <div className="bg-zinc-800/60 border border-zinc-700/40 rounded-xl p-4 space-y-3">
+                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Ao Rejeitar</p>
+                <select
+                  value={genForm.reject_action}
+                  onChange={e => setG('reject_action', e.target.value)}
+                  className="w-full bg-zinc-800 border border-zinc-700/50 text-white text-sm rounded-lg px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                >
+                  <option value="offer_another">Oferecer outra downsell</option>
+                </select>
+                {genForm.reject_action === 'offer_another' && (
+                  <div className="relative">
+                    <ExternalLink className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none" />
+                    <input
+                      type="url"
+                      value={genForm.reject_url}
+                      onChange={e => setG('reject_url', e.target.value)}
+                      placeholder="https://..."
+                      className="w-full bg-zinc-800 border border-zinc-700/50 text-white text-sm rounded-lg pl-9 pr-3 py-2.5 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500/60 transition-all"
+                    />
+                  </div>
+                )}
+
+                {/* Texto do link rejeitar */}
+                <input
+                  type="text"
+                  value={genForm.reject_text}
+                  onChange={e => setG('reject_text', e.target.value)}
+                  placeholder="Texto do link rejeitar"
+                  className="w-full bg-zinc-800 border border-zinc-700/50 text-white text-sm rounded-lg px-3 py-2 placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                />
+              </div>
+
+              {/* ── Preview em tempo real ── */}
+              <div className="bg-zinc-950 border border-zinc-800 rounded-xl p-5 space-y-3">
+                <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Preview</p>
+                <div className="flex flex-col items-center gap-3">
+                  <button
+                    type="button"
+                    className="w-full py-3.5 rounded-xl text-white font-bold text-sm transition-all pointer-events-none"
+                    style={{ backgroundColor: genForm.accept_color, boxShadow: `0 8px 20px -4px ${genForm.accept_color}60` }}
+                  >
+                    {genForm.accept_text || 'Texto do botão aceitar'}
+                  </button>
+                  <button
+                    type="button"
+                    className="text-zinc-500 text-xs underline underline-offset-2 pointer-events-none"
+                  >
+                    {genForm.reject_text || 'Texto do link rejeitar'}
+                  </button>
+                </div>
+              </div>
+
+
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center gap-3 px-6 py-4 border-t border-zinc-700/50 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowGenerator(false)}
+                className="flex-1 py-2.5 text-sm font-medium text-zinc-400 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveGenerator}
+                disabled={savingGen || !genForm.product_id}
+                className="flex-1 inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold py-2.5 rounded-lg transition-colors"
+              >
+                {savingGen
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Gerando...</>
+                  : 'Gerar Funil'
+                }
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* ══ Modal: Script Gerado com Sucesso ══════════════════════════════════ */}
+      {showGenSuccess && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-lg bg-zinc-900 border border-zinc-700/50 rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-700/50 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-full bg-emerald-500/15 flex items-center justify-center shrink-0">
+                  <svg className="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-white">Script gerado com sucesso!</h2>
+                  <p className="text-xs text-zinc-500 mt-0.5">Cole esse código na sua página de upsell</p>
+                </div>
+              </div>
+              <button
+                onClick={() => { setShowGenSuccess(false); setScriptCopied(false) }}
+                className="text-zinc-500 hover:text-zinc-300 transition-colors p-1 rounded-lg hover:bg-zinc-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 px-6 py-5 space-y-4">
+
+              {/* Textarea com o script */}
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">
+                  Código do Widget
+                </label>
+                <textarea
+                  readOnly
+                  value={generatedScript}
+                  rows={14}
+                  className="w-full bg-zinc-950 border border-zinc-700/50 text-emerald-300 text-xs font-mono rounded-xl px-4 py-3 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500/40 leading-relaxed"
+                  onClick={e => e.target.select()}
+                />
+              </div>
+
+              {/* Instrução */}
+              <div className="flex items-start gap-2.5 bg-zinc-800/60 border border-zinc-700/40 rounded-xl px-4 py-3">
+                <span className="text-amber-400 text-sm shrink-0 mt-0.5">💡</span>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Cole esse script no <span className="text-zinc-200 font-medium">&lt;body&gt;</span> da sua página de upsell. O widget será renderizado automaticamente com as configurações que você definiu.
+                </p>
+              </div>
+
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center gap-3 px-6 py-4 border-t border-zinc-700/50 shrink-0">
+              <button
+                type="button"
+                onClick={() => { setShowGenSuccess(false); setScriptCopied(false) }}
+                className="flex-1 py-2.5 text-sm font-medium text-zinc-400 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(generatedScript)
+                  setScriptCopied(true)
+                  setTimeout(() => setScriptCopied(false), 2500)
+                }}
+                className="flex-1 inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold py-2.5 rounded-lg transition-colors"
+              >
+                {scriptCopied
+                  ? <><CheckCheck className="w-4 h-4" /> Copiado!</>
+                  : <><Copy className="w-4 h-4" /> Copiar Código</>
+                }
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
     </DashboardLayout>
   )
 }

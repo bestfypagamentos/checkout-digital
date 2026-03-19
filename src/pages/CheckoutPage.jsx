@@ -22,12 +22,15 @@ function maskPhone(v) {
 
 // ── Checkout settings defaults ────────────────────────────────────────────────
 const CS_DEFAULTS = {
-  logo_url:         '',
-  logo_position:    'left',
-  timer_seconds:    600,
-  timer_bg_color:   '#EAB308',
-  timer_text_color: '#713F12',
-  button_color:     '#16A34A',
+  logo_url:          '',
+  logo_position:     'left',
+  header_bg_color:   '#FFFFFF',
+  header_text_color: '#18181B',
+  timer_seconds:     600,
+  timer_bg_color:    '#EAB308',
+  timer_text_color:  '#713F12',
+  button_color:      '#16A34A',
+  bump_color:        '#16A34A',
 }
 
 // ── Countdown hook ────────────────────────────────────────────────────────────
@@ -69,6 +72,8 @@ export default function CheckoutPage() {
   const channelRef                        = useRef(null)
   const [productOffers, setProductOffers] = useState([])
   const [selectedOffer, setSelectedOffer] = useState(null)
+  const [bumps, setBumps] = useState([])
+  const [selectedBumpIds, setSelectedBumpIds] = useState(new Set())
 
   // ── Init + Auto-restore ───────────────────────────────────────────────────
   useEffect(() => {
@@ -138,6 +143,18 @@ export default function CheckoutPage() {
           setCs({ ...CS_DEFAULTS, ...defaultCheckout.settings })
         }
       }
+
+      // Busca Order Bumps ativos
+      const { data: bumpsData } = await supabase
+        .from('product_order_bumps')
+        .select(`
+          id, cta, title, description, apply_discount, original_price, position,
+          bump_product:products!bump_product_id(id, name, price, image_url),
+          bump_offer:product_offers!bump_offer_id(id, name, price)
+        `)
+        .eq('product_id', productId)
+        .order('position', { ascending: true })
+      setBumps(bumpsData || [])
 
       // Busca nome do vendedor
       const { data: profile } = await supabase
@@ -272,16 +289,26 @@ export default function CheckoutPage() {
     setPageState('pix')
   }
 
+  function toggleBump(id) {
+    setSelectedBumpIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   const handleCopy = async () => {
     await navigator.clipboard.writeText(paymentResult.qrCodeText)
     setCopied(true)
     setTimeout(() => setCopied(false), 2500)
   }
 
-  const activePrice = selectedOffer?.price ?? product?.price ?? 0
-  const discount = couponApplied && product ? activePrice * quantity * (couponApplied.discount_percent / 100) : 0
-  const total = activePrice * quantity - discount
-  const fmt   = (v) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  const activePrice  = selectedOffer?.price ?? product?.price ?? 0
+  const discount     = couponApplied && product ? activePrice * quantity * (couponApplied.discount_percent / 100) : 0
+  const bumpsTotal   = bumps.filter(b => selectedBumpIds.has(b.id)).reduce((sum, b) => sum + getBumpPrice(b), 0)
+  const total        = activePrice * quantity - discount + bumpsTotal
+  const fmt          = (v) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (pageState === 'loading') return (
@@ -597,11 +624,27 @@ export default function CheckoutPage() {
                 <span className="text-emerald-600 font-medium">-{fmt(discount)}</span>
               </div>
             )}
+            {/* Bump line items — animados */}
+            {bumps.map(b => (
+              <div
+                key={b.id}
+                className="overflow-hidden transition-all duration-300 ease-in-out"
+                style={{
+                  maxHeight: selectedBumpIds.has(b.id) ? '36px' : '0px',
+                  opacity:   selectedBumpIds.has(b.id) ? 1 : 0,
+                }}
+              >
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-500 truncate pr-2">{b.title}</span>
+                  <span className="text-zinc-700 font-medium shrink-0">+{fmt(getBumpPrice(b))}</span>
+                </div>
+              </div>
+            ))}
           </div>
           <div className="border-t border-gray-100 mt-3 pt-3">
             <div className="flex items-baseline justify-between">
               <span className="font-bold text-zinc-900 text-base">Total</span>
-              <span className="text-2xl font-black" style={{ color: cs.button_color }}>{fmt(total)}</span>
+              <span className="text-2xl font-black transition-all duration-300" style={{ color: cs.button_color }}>{fmt(total)}</span>
             </div>
             <p className="text-xs text-zinc-400 text-right mt-0.5">Pagamento exclusivo via PIX</p>
           </div>
@@ -673,6 +716,21 @@ export default function CheckoutPage() {
             </div>
           </div>
 
+          {/* ── Order Bumps ── */}
+          {bumps.length > 0 && (
+            <div className="mt-5 mb-5 space-y-3">
+              {bumps.map(bump => (
+                <BumpCard
+                  key={bump.id}
+                  bump={bump}
+                  selected={selectedBumpIds.has(bump.id)}
+                  onToggle={() => toggleBump(bump.id)}
+                  accentColor={cs.bump_color || cs.button_color}
+                />
+              ))}
+            </div>
+          )}
+
           {/* Erro global */}
           {errorMsg && (
             <div className="flex items-start gap-2.5 bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-4">
@@ -699,13 +757,21 @@ export default function CheckoutPage() {
   )
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function getBumpPrice(bump) {
+  return Number(bump.bump_offer?.price ?? bump.bump_product?.price ?? 0)
+}
+
 // ── Sub-componentes ───────────────────────────────────────────────────────────
 function Shell({ children, sellerName, cs }) {
   const btn = cs?.button_color || '#16A34A'
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Top bar */}
-      <header className="bg-white border-b border-gray-100 shadow-sm sticky top-0 z-10">
+      <header
+        className="border-b border-gray-100 shadow-sm sticky top-0 z-10"
+        style={{ backgroundColor: cs?.header_bg_color || '#FFFFFF' }}
+      >
         <div className={`max-w-lg mx-auto px-4 h-14 flex items-center ${cs?.logo_position === 'center' ? 'justify-center relative' : 'justify-between'}`}>
           <div className="flex items-center gap-2">
             {cs?.logo_url ? (
@@ -722,12 +788,16 @@ function Shell({ children, sellerName, cs }) {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                   </svg>
                 </div>
-                {sellerName && <span className="text-sm font-bold text-zinc-800">{sellerName}</span>}
+                {sellerName && (
+                  <span className="text-sm font-bold" style={{ color: cs?.header_text_color || '#18181B' }}>
+                    {sellerName}
+                  </span>
+                )}
               </>
             )}
           </div>
           {cs?.logo_position !== 'center' && (
-            <div className="flex items-center gap-1.5 text-zinc-400">
+            <div className="flex items-center gap-1.5" style={{ color: cs?.header_text_color || '#71717A', opacity: 0.65 }}>
               <ShieldCheck className="w-3.5 h-3.5" />
               <span className="text-xs font-medium">Ambiente seguro</span>
             </div>
@@ -759,6 +829,81 @@ function Field({ children, error }) {
 
 function input(hasError) {
   return `w-full bg-white border ${hasError ? 'border-red-300 focus:border-red-400 focus:ring-red-400/15' : 'border-gray-200 focus:border-[#16A34A] focus:ring-green-500/10'} rounded-xl px-4 py-3 text-sm text-zinc-800 placeholder-zinc-400 focus:ring-2 outline-none transition shadow-sm`
+}
+
+function BumpCard({ bump, selected, onToggle, accentColor }) {
+  const price = getBumpPrice(bump)
+  const fmt   = (v) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+  return (
+    <div
+      onClick={onToggle}
+      className="rounded-2xl overflow-hidden cursor-pointer select-none border-2 border-dashed transition-all duration-200"
+      style={{ borderColor: accentColor }}
+    >
+      {/* ── Cabeçalho verde ── */}
+      <div
+        className="flex items-center justify-between px-4 py-3"
+        style={{ backgroundColor: accentColor }}
+      >
+        <p className="text-sm font-bold text-white uppercase tracking-wide leading-tight">
+          {bump.cta || 'Adicione também:'}
+        </p>
+        {/* Ícone de check no header */}
+        <div className={`w-6 h-6 rounded-full border-2 border-white/60 flex items-center justify-center shrink-0 transition-all duration-200 ${selected ? 'bg-white/30' : 'bg-white/10'}`}>
+          {selected && (
+            <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          )}
+        </div>
+      </div>
+
+      {/* ── Corpo cinza claro ── */}
+      <div className="bg-gray-100 px-4 py-3 flex items-center gap-3">
+        {/* Imagem */}
+        {bump.bump_product?.image_url && (
+          <img
+            src={bump.bump_product.image_url}
+            alt={bump.title}
+            className="w-16 h-16 rounded-xl object-cover border border-gray-200 shrink-0"
+          />
+        )}
+
+        {/* Texto */}
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-zinc-900 text-sm leading-snug">{bump.title}</p>
+          {bump.description && (
+            <p className="text-xs text-zinc-500 mt-0.5 leading-relaxed">{bump.description}</p>
+          )}
+        </div>
+
+        {/* Preço */}
+        <div className="shrink-0 text-right">
+          <p className="text-base font-black" style={{ color: accentColor }}>{fmt(price)}</p>
+          {bump.apply_discount && bump.original_price && (
+            <p className="text-xs text-zinc-400 line-through">{fmt(bump.original_price)}</p>
+          )}
+        </div>
+      </div>
+
+      {/* ── Rodapé verde com checkbox ── */}
+      <div
+        className="flex items-center gap-3 px-4 py-3"
+        style={{ backgroundColor: accentColor }}
+      >
+        {/* Checkbox nativo estilizado */}
+        <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-all duration-200 ${selected ? 'bg-white border-white' : 'bg-transparent border-white/70'}`}>
+          {selected && (
+            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke={accentColor} strokeWidth={3.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          )}
+        </div>
+        <p className="text-sm font-bold text-white">Adicionar Produto</p>
+      </div>
+    </div>
+  )
 }
 
 function Footer({ sellerName }) {

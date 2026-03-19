@@ -8,10 +8,13 @@ import { useAuth } from '../contexts/AuthContext'
 const DEFAULT_SETTINGS = {
   logo_url:         '',
   logo_position:    'left',
+  header_bg_color:  '#FFFFFF',
+  header_text_color:'#18181B',
   timer_seconds:    600,
   timer_bg_color:   '#EAB308',
   timer_text_color: '#713F12',
   button_color:     '#16A34A',
+  bump_color:       '#16A34A',
 }
 
 // ─── Color Picker ──────────────────────────────────────────────────────────────
@@ -66,7 +69,7 @@ function CheckoutPreview({ settings, product }) {
     <div className="bg-gray-50 min-h-full" style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}>
 
       {/* Header */}
-      <header className="bg-white border-b border-gray-100 shadow-sm">
+      <header className="border-b border-gray-100 shadow-sm" style={{ backgroundColor: settings.header_bg_color }}>
         <div className={`px-4 h-14 flex items-center ${settings.logo_position === 'center' ? 'justify-center' : 'justify-between'}`}>
           <div className="flex items-center gap-2">
             {settings.logo_url ? (
@@ -77,15 +80,18 @@ function CheckoutPreview({ settings, product }) {
                 onError={e => { e.currentTarget.style.display = 'none' }}
               />
             ) : (
-              <div className="w-7 h-7 rounded-lg flex items-center justify-center shadow-sm" style={{ backgroundColor: btn }}>
-                <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-              </div>
+              <>
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center shadow-sm" style={{ backgroundColor: btn }}>
+                  <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <span className="text-sm font-bold" style={{ color: settings.header_text_color }}>Bestfy</span>
+              </>
             )}
           </div>
           {settings.logo_position !== 'center' && (
-            <div className="flex items-center gap-1 text-th-text-3">
+            <div className="flex items-center gap-1" style={{ color: settings.header_text_color, opacity: 0.6 }}>
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
               </svg>
@@ -182,6 +188,38 @@ function CheckoutPreview({ settings, product }) {
             </span>
           </div>
         </div>
+
+        {/* Order Bump preview */}
+        {(() => {
+          const bc = settings.bump_color
+          return (
+            <div className="rounded-2xl overflow-hidden border-2 border-dashed" style={{ borderColor: bc }}>
+              {/* Header */}
+              <div className="flex items-center justify-between px-3 py-2.5" style={{ backgroundColor: bc }}>
+                <p className="text-[11px] font-bold text-white uppercase tracking-wide">SIM! QUERO ADICIONAR</p>
+                <div className="w-5 h-5 rounded-full border-2 border-white/60 flex items-center justify-center bg-white/10">
+                  <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+              </div>
+              {/* Body */}
+              <div className="bg-gray-100 px-3 py-2.5 flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-lg bg-gray-300 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-bold text-zinc-900">Nome do produto</p>
+                  <p className="text-[10px] text-zinc-500">Descrição do produto</p>
+                </div>
+                <p className="text-sm font-black shrink-0" style={{ color: bc }}>R$ 0,00</p>
+              </div>
+              {/* Footer */}
+              <div className="flex items-center gap-2 px-3 py-2.5" style={{ backgroundColor: bc }}>
+                <div className="w-4 h-4 rounded border-2 border-white/70 shrink-0" />
+                <p className="text-[11px] font-bold text-white">Adicionar Produto</p>
+              </div>
+            </div>
+          )
+        })()}
 
         {/* Submit button */}
         <button
@@ -376,6 +414,17 @@ export default function CheckoutEditor() {
               )}
             </div>
 
+            <ColorPicker
+              label="Cor de fundo do header"
+              value={settings.header_bg_color}
+              onChange={v => set('header_bg_color', v)}
+            />
+            <ColorPicker
+              label="Cor do texto do header"
+              value={settings.header_text_color}
+              onChange={v => set('header_text_color', v)}
+            />
+
             {/* Position */}
             <div>
               <label className="label">Posição da logo</label>
@@ -454,6 +503,18 @@ export default function CheckoutEditor() {
             />
             <p className="text-[11px] text-th-text-4 leading-relaxed">
               Aplicada também nos preços, totais e seleção do método de pagamento.
+            </p>
+          </Section>
+
+          {/* Order Bump */}
+          <Section title="Order Bump">
+            <ColorPicker
+              label="Cor do card"
+              value={settings.bump_color}
+              onChange={v => set('bump_color', v)}
+            />
+            <p className="text-[11px] text-th-text-4 leading-relaxed">
+              Usada no cabeçalho, rodapé e borda do card de oferta adicional.
             </p>
           </Section>
 

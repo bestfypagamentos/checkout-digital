@@ -33,6 +33,7 @@ export default function ProductsPage() {
   const [loadingList, setLoadingList] = useState(true)
   const [loadingSubmit, setLoadingSubmit] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
+  const [deleteError, setDeleteError] = useState(null)
   const [copiedId, setCopiedId] = useState(null)
   const [error, setError] = useState(null)
   const [page, setPage] = useState(1)
@@ -143,7 +144,29 @@ export default function ProductsPage() {
 
   const handleDelete = async (id) => {
     setDeletingId(id)
-    await supabase.from('products').delete().eq('id', id)
+    setDeleteError(null)
+
+    // Remove vendas associadas antes de excluir o produto (FK constraint)
+    const { error: salesErr } = await supabase.from('sales').delete().eq('product_id', id).eq('seller_id', user.id)
+    if (salesErr) {
+      setDeleteError('Erro ao remover vendas associadas: ' + salesErr.message)
+      setDeletingId(null)
+      return
+    }
+
+    const { error: delErr } = await supabase.from('products').delete().eq('id', id).eq('user_id', user.id)
+    if (delErr) {
+      if (delErr.message.includes('sales_product_id_fkey')) {
+        setDeleteError('Este produto possui vendas registradas e não pode ser excluído.')
+      } else {
+        setDeleteError(delErr.message)
+      }
+    } else {
+      const updated = products.filter(p => p.id !== id)
+      cacheSet(CACHE_KEY, updated)
+      setProducts(updated)
+      setPage(1)
+    }
     setDeletingId(null)
   }
 
@@ -188,6 +211,16 @@ export default function ProductsPage() {
           </button>
         )}
       </div>
+
+      {/* Delete error */}
+      {deleteError && (
+        <div className="mb-4 flex items-center justify-between bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
+          <p className="text-sm text-red-400">Erro ao excluir: {deleteError}</p>
+          <button onClick={() => setDeleteError(null)} className="text-red-400 hover:text-red-300 ml-3">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* ── Modal / Form ── */}
       {showForm && (
@@ -314,8 +347,11 @@ export default function ProductsPage() {
       ) : products.length === 0 ? (
         <EmptyState onAdd={openCreate} />
       ) : (() => {
-        const totalPages = Math.ceil(products.length / PAGE_SIZE)
-        const paginated  = products.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+        const filtered   = search
+          ? products.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+          : products
+        const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
+        const paginated  = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
         return (
         <div className="th-card bg-th-surface border border-th-line rounded-xl overflow-hidden">
           {/* Table header */}
@@ -329,7 +365,11 @@ export default function ProductsPage() {
 
           {/* Rows */}
           <ul className="divide-y divide-th-line">
-            {paginated.map(product => (
+            {paginated.length === 0 ? (
+              <li className="px-6 py-12 text-center text-sm text-th-text-4">
+                Nenhum produto encontrado para "<span className="font-medium text-th-text-3">{search}</span>".
+              </li>
+            ) : paginated.map(product => (
               <li key={product.id} className="grid md:grid-cols-[1fr_2fr_120px_1fr_140px] gap-4 items-center px-6 py-4 hover:bg-th-raised/40 transition-colors">
                 {/* Nome */}
                 <div>
@@ -412,7 +452,10 @@ export default function ProductsPage() {
           {/* Footer */}
           <div className="flex items-center justify-between px-6 py-3 border-t border-th-line">
             <span className="text-xs text-th-text-4">
-              {products.length} {products.length === 1 ? 'produto cadastrado' : 'produtos cadastrados'}
+              {search
+                ? `${filtered.length} de ${products.length} ${products.length === 1 ? 'produto' : 'produtos'}`
+                : `${products.length} ${products.length === 1 ? 'produto cadastrado' : 'produtos cadastrados'}`
+              }
             </span>
           </div>
 
