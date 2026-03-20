@@ -1,4 +1,8 @@
 
+[functions.send-email]
+enabled = true
+verify_jwt = false
+
 [functions.bestfy-webhook]
 enabled = true
 verify_jwt = true

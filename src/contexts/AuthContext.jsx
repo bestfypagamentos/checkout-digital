@@ -46,7 +46,19 @@ export function AuthProvider({ children }) {
     return { error }
   }
 
-  const value = { user, session, loading, signUp, signIn, signOut }
+  const resetPasswordForEmail = async (email) => {
+    const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: 'https://seguro.bestfybr.com.br/reset-password',
+    })
+    return { data, error }
+  }
+
+  const updatePassword = async (newPassword) => {
+    const { data, error } = await supabase.auth.updateUser({ password: newPassword })
+    return { data, error }
+  }
+
+  const value = { user, session, loading, signUp, signIn, signOut, resetPasswordForEmail, updatePassword }
 
   return (
     <AuthContext.Provider value={value}>
