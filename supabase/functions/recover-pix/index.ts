@@ -69,7 +69,7 @@ serve(async (req) => {
         id, status, amount, created_at,
         customer_name, customer_email, customer_cpf,
         qr_code_url, qr_code_text,
-        product_id, seller_id,
+        product_id, seller_id, recovery_clicked_at,
         products ( id, name, image_url, description )
       `)
       .eq('id', saleId)
@@ -88,6 +88,14 @@ serve(async (req) => {
     // ── Venda cancelada/falhou ────────────────────────────────────────────────
     if (sale.status === 'failed' || sale.status === 'refunded') {
       return json({ status: sale.status, message: 'Este pedido foi cancelado.' }, 200, cors)
+    }
+
+    // ── Registra o clique no link de recuperação (apenas na primeira vez) ────
+    if (!sale.recovery_clicked_at) {
+      await supabase
+        .from('sales')
+        .update({ recovery_clicked_at: new Date().toISOString() })
+        .eq('id', sale.id)
     }
 
     const product = sale.products as { id: string; name: string; image_url: string | null; description: string | null } | null

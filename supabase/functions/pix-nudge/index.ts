@@ -29,7 +29,7 @@ function pixNudgeTemplate(params: {
 }): string {
   const { customerName, productName, amount, saleId, productImage } = params
   const firstName    = customerName.split(' ')[0]
-  const recoveryUrl  = `${SITE_URL}/checkout/recuperar/${saleId}`
+  const recoveryUrl  = `${SITE_URL}/checkout/recuperar/${saleId}?utm_source=bestfy&utm_medium=email&utm_campaign=pix-nudge`
   const amountFormatted = brl(amount)
 
   const productImgHtml = productImage
