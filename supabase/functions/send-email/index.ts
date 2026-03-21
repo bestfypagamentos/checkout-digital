@@ -41,13 +41,13 @@ async function verifyHookSignature(rawBody: string, signatureHeader: string | nu
 }
 
 // ── Monta o link de verificação do Supabase Auth ──────────────────────────────
-function buildConfirmUrl(tokenHash: string, type: string, redirectTo: string): string {
-  const params = new URLSearchParams({
-    token_hash:  tokenHash,
-    type:        type,
-    redirect_to: redirectTo || SITE_URL,
-  })
-  return `${SUPABASE_URL}/auth/v1/verify?${params}`
+function buildConfirmUrl(tokenHash: string, type: string, _redirectTo: string): string {
+  if (type === 'recovery') {
+    const params = new URLSearchParams({ token_hash: tokenHash, type })
+    return `${SITE_URL}/reset-password?${params}`
+  }
+  const params = new URLSearchParams({ token_hash: tokenHash, type })
+  return `${SITE_URL}/auth/confirm?${params}`
 }
 
 // ── Templates HTML ─────────────────────────────────────────────────────────────
@@ -67,16 +67,10 @@ function baseLayout(title: string, content: string): string {
         <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
           <tr>
             <td align="center" style="padding-bottom:24px;">
-              <table cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="background:#16A34A;border-radius:12px;width:40px;height:40px;text-align:center;vertical-align:middle;">
-                    <span style="color:#fff;font-size:20px;font-weight:900;line-height:40px;">⚡</span>
-                  </td>
-                  <td style="padding-left:10px;vertical-align:middle;">
-                    <span style="font-size:20px;font-weight:800;color:#18181B;letter-spacing:-0.5px;">Bestfy</span>
-                  </td>
-                </tr>
-              </table>
+              <a href="${SITE_URL}" style="text-decoration:none;display:inline-block;">
+                <img src="${SITE_URL}/bestfy-logo.svg" alt="Bestfy" width="120" height="39"
+                     style="display:block;border:0;outline:none;" />
+              </a>
             </td>
           </tr>
 

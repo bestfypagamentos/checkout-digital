@@ -34,22 +34,31 @@ export default function ResetPasswordPage() {
   const [success,   setSuccess]   = useState(false)
   const [ready,     setReady]     = useState(false)
 
-  const { updatePassword, session, loading: authLoading } = useAuth()
+  const { updatePassword } = useAuth()
   const navigate = useNavigate()
 
-  // Supabase dispara PASSWORD_RECOVERY quando o usuário chega pelo link do e-mail.
-  // Usamos a session do AuthContext (que monta antes) para evitar race condition,
-  // mas também escutamos o evento caso chegue após o componente montar.
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') setReady(true)
-    })
-    return () => subscription.unsubscribe()
-  }, [])
+    const params     = new URLSearchParams(window.location.search)
+    const tokenHash  = params.get('token_hash')
+    const type       = params.get('type')
 
-  useEffect(() => {
-    if (!authLoading && session) setReady(true)
-  }, [authLoading, session])
+    if (tokenHash && type === 'recovery') {
+      // Verifica o token via SDK e estabelece a sessão de recovery
+      supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' })
+        .then(({ error }) => {
+          if (error) {
+            console.error('[reset-password] verifyOtp error:', error.message)
+          } else {
+            setReady(true)
+          }
+        })
+    } else {
+      // Fallback: usuário já tem sessão ativa (ex: logado e mudando senha)
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) setReady(true)
+      })
+    }
+  }, [])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -77,7 +86,11 @@ export default function ResetPasswordPage() {
     setLoading(false)
 
     if (updateError) {
-      setError('Não foi possível redefinir a senha. O link pode ter expirado.')
+      if (updateError.code === 'same_password') {
+        setError('A nova senha não pode ser igual à senha atual.')
+      } else {
+        setError('Não foi possível redefinir a senha. O link pode ter expirado.')
+      }
       return
     }
 

@@ -11,6 +11,7 @@ import TransactionsPage from './pages/TransactionsPage'
 import CheckoutPage from './pages/CheckoutPage'
 import ProductEditPage from './pages/ProductEditPage'
 import CheckoutEditor from './pages/CheckoutEditor'
+import PixRecuperacaoPage from './pages/PixRecuperacaoPage'
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/checkout/:productId" element={<CheckoutPage />} />
+          <Route path="/checkout/recuperar/:saleId" element={<PixRecuperacaoPage />} />
 
           {/* Protected routes */}
           <Route element={<ProtectedRoute />}>

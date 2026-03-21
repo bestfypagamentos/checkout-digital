@@ -428,7 +428,7 @@ export default function CheckoutPage() {
 
         </div>
 
-        <Footer sellerName={sellerName} />
+        <Footer sellerName={sellerName} cs={cs} />
       </div>
     </Shell>
   )
@@ -469,7 +469,7 @@ export default function CheckoutPage() {
           <p className="text-sm text-[#16A34A] font-bold mt-1">Aprovado via PIX</p>
         </Card>
 
-        <Footer sellerName={sellerName} />
+        <Footer sellerName={sellerName} cs={cs} />
       </div>
     </Shell>
   )
@@ -776,7 +776,7 @@ export default function CheckoutPage() {
 
         </form>
 
-        <Footer sellerName={sellerName} />
+        <Footer sellerName={sellerName} cs={cs} />
       </div>
     </Shell>
   )
@@ -931,12 +931,47 @@ function BumpCard({ bump, selected, onToggle, accentColor }) {
   )
 }
 
-function Footer({ sellerName }) {
+const PAYMENT_ICONS = [
+  { src: '/icons/card-visa.svg',       alt: 'Visa' },
+  { src: '/icons/card-mastercard.svg', alt: 'Mastercard' },
+  { src: '/icons/card-amex.svg',       alt: 'American Express' },
+  { src: '/icons/card-elo.svg',        alt: 'Elo' },
+  { src: '/icons/card-hiper.svg',      alt: 'Hipercard' },
+  { src: '/icons/card-aura.svg',       alt: 'Aura' },
+  { src: '/icons/card-diners.svg',     alt: 'Diners Club' },
+  { src: '/icons/card-pix.svg',        alt: 'PIX' },
+  { src: '/icons/card-billet.svg',     alt: 'Boleto' },
+]
+
+function PaymentIcons() {
+  return (
+    <div className="flex items-center justify-center flex-wrap gap-1.5 mt-3">
+      {PAYMENT_ICONS.map(({ src, alt }) => (
+        <img key={alt} src={src} alt={alt} className="h-[26px] w-auto" />
+      ))}
+    </div>
+  )
+}
+
+function Footer({ sellerName, cs }) {
+  const logoUrl = cs?.logo_url
   return (
     <div className="mt-8 pb-8 text-center space-y-2">
+      {/* Logo do vendedor ou fallback Bestfy */}
       <div className="flex items-center justify-center gap-1.5">
-        <span className="text-sm font-black text-zinc-800 tracking-tight">b</span>
-        <span className="text-sm font-bold text-zinc-700">Bestfy</span>
+        {logoUrl ? (
+          <img
+            src={logoUrl}
+            alt={sellerName || 'Logo'}
+            className="h-8 max-w-[140px] object-contain"
+            onError={e => { e.currentTarget.style.display = 'none' }}
+          />
+        ) : (
+          <>
+            <span className="text-sm font-black text-zinc-800 tracking-tight">b</span>
+            <span className="text-sm font-bold text-zinc-700">Bestfy</span>
+          </>
+        )}
       </div>
       {sellerName && (
         <p className="text-xs text-zinc-400 leading-relaxed">
@@ -944,7 +979,9 @@ function Footer({ sellerName }) {
           <span className="font-medium text-zinc-600">{sellerName}</span>
         </p>
       )}
-      <div className="flex items-center justify-center gap-3 text-xs text-zinc-400">
+      {/* Ícones de meios de pagamento */}
+      <PaymentIcons />
+      <div className="flex items-center justify-center gap-3 text-xs text-zinc-400 mt-2">
         <a href="#" className="underline hover:text-zinc-600 transition-colors">Política de Privacidade</a>
         <span>·</span>
         <a href="#" className="underline hover:text-zinc-600 transition-colors">Termos de Serviço</a>

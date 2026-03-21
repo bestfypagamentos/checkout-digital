@@ -3,6 +3,26 @@
 enabled = true
 verify_jwt = false
 
+[functions.create-transaction]
+enabled = true
+verify_jwt = false
+
+[functions.get-delivery-url]
+enabled = true
+verify_jwt = false
+
+[functions.create-upsell-session]
+enabled = true
+verify_jwt = false
+
+[functions.pix-nudge]
+enabled = true
+verify_jwt = false
+
+[functions.recover-pix]
+enabled = true
+verify_jwt = false
+
 [functions.bestfy-webhook]
 enabled = true
 verify_jwt = true
