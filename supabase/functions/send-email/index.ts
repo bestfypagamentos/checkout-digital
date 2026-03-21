@@ -43,7 +43,7 @@ async function verifyHookSignature(rawBody: string, signatureHeader: string | nu
 // ── Monta o link de verificação do Supabase Auth ──────────────────────────────
 function buildConfirmUrl(tokenHash: string, type: string, redirectTo: string): string {
   const params = new URLSearchParams({
-    token:       tokenHash,
+    token_hash:  tokenHash,
     type:        type,
     redirect_to: redirectTo || SITE_URL,
   })
@@ -311,10 +311,16 @@ serve(async (req) => {
     const payload = JSON.parse(rawBody)
     const { user, email_data } = payload
 
+    console.log('[send-email] email_data:', JSON.stringify(email_data))
+
     const toEmail     = user?.email ?? ''
     const actionType  = email_data?.email_action_type ?? ''
-    const tokenHash   = email_data?.token_hash ?? ''
-    const redirectTo  = email_data?.redirect_to ?? SITE_URL
+    const tokenHash   = email_data?.token_hash ?? email_data?.token ?? ''
+    const rawRedirect = email_data?.redirect_to ?? SITE_URL
+    // Para recovery, garante que o redirect aponte para /reset-password
+    const redirectTo  = actionType === 'recovery'
+      ? `${SITE_URL}/reset-password`
+      : rawRedirect
 
     if (!toEmail || !actionType || !tokenHash) {
       console.error('[send-email] Payload incompleto:', { toEmail, actionType, tokenHash })
@@ -325,6 +331,7 @@ serve(async (req) => {
     const { subject, html } = buildEmail(actionType, confirmUrl, toEmail)
 
     console.log(`[send-email] Enviando '${actionType}' para ${toEmail}`)
+    console.log(`[send-email] confirmUrl: ${confirmUrl}`)
 
     // ── Chama a API do Postmark ────────────────────────────────────────────────
     const pmRes = await fetch('https://api.postmarkapp.com/email', {
