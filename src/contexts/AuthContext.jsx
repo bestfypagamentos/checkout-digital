@@ -31,6 +31,7 @@ export function AuthProvider({ children }) {
       password,
       options: {
         data: { full_name: name },
+        emailRedirectTo: 'https://seguro.bestfybr.com.br/auth/confirm',
       },
     })
     return { data, error }

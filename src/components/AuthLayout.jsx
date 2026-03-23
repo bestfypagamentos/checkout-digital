@@ -1,6 +1,9 @@
 import { Link } from 'react-router-dom'
+import { useTheme } from '../contexts/ThemeContext'
 
 export default function AuthLayout({ children, title, subtitle, footerText, footerLink, footerLinkText }) {
+  const { dark } = useTheme()
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4 bg-th-bg">
       {/* Background subtle grid */}
@@ -9,11 +12,11 @@ export default function AuthLayout({ children, title, subtitle, footerText, foot
       <div className="relative w-full max-w-md">
         {/* Logo / Brand */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-emerald-600 mb-4">
-            <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
+          <img
+            src={dark ? '/logo-dark.svg' : '/logo-white.svg'}
+            alt="Bestfy"
+            className="h-10 mx-auto mb-4"
+          />
           <h1 className="text-2xl font-semibold text-th-text">{title}</h1>
           {subtitle && <p className="mt-1 text-sm text-th-text-3">{subtitle}</p>}
         </div>

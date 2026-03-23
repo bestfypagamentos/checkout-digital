@@ -12,6 +12,8 @@ import CheckoutPage from './pages/CheckoutPage'
 import ProductEditPage from './pages/ProductEditPage'
 import CheckoutEditor from './pages/CheckoutEditor'
 import PixRecuperacaoPage from './pages/PixRecuperacaoPage'
+import AuthCallbackPage from './pages/AuthCallbackPage'
+import AuthConfirmPage from './pages/AuthConfirmPage'
 
 export default function App() {
   return (
@@ -24,6 +26,8 @@ export default function App() {
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/checkout/:productId" element={<CheckoutPage />} />
           <Route path="/checkout/recuperar/:saleId" element={<PixRecuperacaoPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          <Route path="/auth/confirm" element={<AuthConfirmPage />} />
 
           {/* Protected routes */}
           <Route element={<ProtectedRoute />}>
